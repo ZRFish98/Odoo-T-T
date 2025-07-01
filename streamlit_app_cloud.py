@@ -12,7 +12,7 @@ import numpy as np
 from datetime import datetime
 import logging
 from typing import Dict, List, Tuple, Optional
-from io import BytesIO
+from io import BytesIO, StringIO
 import tempfile
 import os
 
@@ -131,6 +131,25 @@ def read_excel_file(file) -> pd.DataFrame:
             
     except Exception as e:
         raise Exception(f"Failed to read Excel file: {e}")
+
+def read_csv_file(file) -> pd.DataFrame:
+    """Read CSV file as an alternative to Excel"""
+    try:
+        # Try different encodings
+        encodings = ['utf-8', 'latin-1', 'cp1252']
+        for encoding in encodings:
+            try:
+                file.seek(0)  # Reset file pointer
+                return pd.read_csv(file, encoding=encoding)
+            except UnicodeDecodeError:
+                continue
+            except Exception as e:
+                logger.warning(f"CSV reading failed with {encoding}: {e}")
+                continue
+        
+        raise Exception("Failed to read CSV file with any encoding")
+    except Exception as e:
+        raise Exception(f"Failed to read CSV file: {e}")
 
 class PDFExtractor:
     """PDF extraction functionality with fallback methods"""
@@ -510,6 +529,18 @@ def main():
         Required libraries for reading Excel files are not installed. Please ensure the following are available:
         - openpyxl (for .xlsx files)
         - xlrd (for .xls files)
+        
+        **Alternative: You can convert your Excel files to CSV format and upload them instead.**
+        """)
+        
+        # Show CSV upload option as alternative
+        st.info("""
+        📄 **CSV Upload Alternative**
+        
+        If Excel files are not working, you can:
+        1. Open your Excel files in a spreadsheet application
+        2. Save them as CSV files (File → Save As → CSV)
+        3. Upload the CSV files instead
         """)
     
     # Initialize session state
@@ -552,14 +583,32 @@ def main():
         
         with col1:
             st.subheader("📦 Product Variants")
-            product_variants_file = st.file_uploader(
-                "Upload Product Variant Excel file",
-                type=['xlsx', 'xls']
+            
+            # File type selection
+            file_type = st.radio(
+                "Select file type:",
+                ["Excel (.xlsx/.xls)", "CSV (.csv)"],
+                key="product_variants_type"
             )
+            
+            if file_type == "Excel (.xlsx/.xls)":
+                product_variants_file = st.file_uploader(
+                    "Upload Product Variant Excel file",
+                    type=['xlsx', 'xls']
+                )
+            else:
+                product_variants_file = st.file_uploader(
+                    "Upload Product Variant CSV file",
+                    type=['csv']
+                )
             
             if product_variants_file:
                 try:
-                    df = read_excel_file(product_variants_file)
+                    if file_type == "Excel (.xlsx/.xls)":
+                        df = read_excel_file(product_variants_file)
+                    else:
+                        df = read_csv_file(product_variants_file)
+                    
                     st.session_state.product_variants = df
                     st.success(f"✅ Product Variants loaded: {len(df)} products")
                     st.dataframe(df.head(), use_container_width=True)
@@ -568,14 +617,32 @@ def main():
         
         with col2:
             st.subheader("🏪 T&T Store Names")
-            store_names_file = st.file_uploader(
-                "Upload T&T Store Names Excel file",
-                type=['xlsx', 'xls']
+            
+            # File type selection
+            file_type2 = st.radio(
+                "Select file type:",
+                ["Excel (.xlsx/.xls)", "CSV (.csv)"],
+                key="store_names_type"
             )
+            
+            if file_type2 == "Excel (.xlsx/.xls)":
+                store_names_file = st.file_uploader(
+                    "Upload T&T Store Names Excel file",
+                    type=['xlsx', 'xls']
+                )
+            else:
+                store_names_file = st.file_uploader(
+                    "Upload T&T Store Names CSV file",
+                    type=['csv']
+                )
             
             if store_names_file:
                 try:
-                    df = read_excel_file(store_names_file)
+                    if file_type2 == "Excel (.xlsx/.xls)":
+                        df = read_excel_file(store_names_file)
+                    else:
+                        df = read_csv_file(store_names_file)
+                    
                     st.session_state.store_names = df
                     st.success(f"✅ Store Names loaded: {len(df)} stores")
                     st.dataframe(df.head(), use_container_width=True)
@@ -597,21 +664,36 @@ def main():
         st.markdown('<h2 class="step-header">Step 2: Upload Data</h2>', unsafe_allow_html=True)
         
         if not PDFPLUMBER_AVAILABLE:
-            st.info("📄 Upload extracted purchase order data as Excel files (PDF processing not available in this environment).")
+            st.info("📄 Upload extracted purchase order data as Excel or CSV files (PDF processing not available in this environment).")
             
-            uploaded_files = st.file_uploader(
-                "Upload Purchase Order Excel files",
-                type=['xlsx', 'xls'],
-                accept_multiple_files=True,
-                help="Upload Excel files containing extracted purchase order data"
+            # File type selection
+            file_type = st.radio(
+                "Select file type:",
+                ["Excel (.xlsx/.xls)", "CSV (.csv)"],
+                key="data_upload_type"
             )
             
+            if file_type == "Excel (.xlsx/.xls)":
+                uploaded_files = st.file_uploader(
+                    "Upload Purchase Order Excel files",
+                    type=['xlsx', 'xls'],
+                    accept_multiple_files=True,
+                    help="Upload Excel files containing extracted purchase order data"
+                )
+            else:
+                uploaded_files = st.file_uploader(
+                    "Upload Purchase Order CSV files",
+                    type=['csv'],
+                    accept_multiple_files=True,
+                    help="Upload CSV files containing extracted purchase order data"
+                )
+            
             if uploaded_files:
-                st.success(f"📁 {len(uploaded_files)} Excel file(s) uploaded")
+                st.success(f"📁 {len(uploaded_files)} file(s) uploaded")
                 
-                # Process Excel files
-                if st.button("Process Excel Files", type="primary"):
-                    with st.spinner("Processing Excel files..."):
+                # Process files
+                if st.button("Process Files", type="primary"):
+                    with st.spinner("Processing files..."):
                         all_data = []
                         all_errors = []
                         
@@ -619,7 +701,11 @@ def main():
                             st.info(f"Processing file {i+1}/{len(uploaded_files)}: {uploaded_file.name}")
                             
                             try:
-                                df = read_excel_file(uploaded_file)
+                                if file_type == "Excel (.xlsx/.xls)":
+                                    df = read_excel_file(uploaded_file)
+                                else:
+                                    df = read_csv_file(uploaded_file)
+                                
                                 all_data.append(df)
                                 
                             except Exception as e:
@@ -899,15 +985,15 @@ def main():
         st.markdown("""
         **How to use this tool:**
         
-        1. **Upload Reference Data**: Upload Product Variants and Store Names Excel files
-        2. **Upload Data**: Upload PDF files or Excel files with extracted data
+        1. **Upload Reference Data**: Upload Product Variants and Store Names files
+        2. **Upload Data**: Upload PDF files or Excel/CSV files with extracted data
         3. **Process & Convert**: Convert to Odoo-compatible format
         4. **Download Results**: Get your Odoo Import Ready file
         
         **Required Files:**
-        - Product Variant Excel file
-        - T&T Store Names Excel file
-        - T&T Purchase Order PDF files (or Excel files with extracted data)
+        - Product Variant Excel/CSV file
+        - T&T Store Names Excel/CSV file
+        - T&T Purchase Order PDF files (or Excel/CSV files with extracted data)
         
         **Features:**
         - Multi-file processing
