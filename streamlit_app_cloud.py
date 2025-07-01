@@ -491,8 +491,7 @@ def main():
             st.subheader("📦 Product Variants")
             product_variants_file = st.file_uploader(
                 "Upload Product Variant Excel file",
-                type=['xlsx', 'xls'],
-                key="product_variants"
+                type=['xlsx', 'xls']
             )
             
             if product_variants_file:
@@ -508,8 +507,7 @@ def main():
             st.subheader("🏪 T&T Store Names")
             store_names_file = st.file_uploader(
                 "Upload T&T Store Names Excel file",
-                type=['xlsx', 'xls'],
-                key="store_names"
+                type=['xlsx', 'xls']
             )
             
             if store_names_file:
