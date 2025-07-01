@@ -22,7 +22,19 @@ try:
     PDFPLUMBER_AVAILABLE = True
 except ImportError:
     PDFPLUMBER_AVAILABLE = False
-    st.warning("⚠️ pdfplumber not available. Using alternative PDF processing method.")
+
+# Try to import Excel reading libraries
+try:
+    import openpyxl
+    OPENPYXL_AVAILABLE = True
+except ImportError:
+    OPENPYXL_AVAILABLE = False
+
+try:
+    import xlrd
+    XLRD_AVAILABLE = True
+except ImportError:
+    XLRD_AVAILABLE = False
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -78,6 +90,47 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
+
+def read_excel_file(file) -> pd.DataFrame:
+    """Read Excel file with fallback options for different engines"""
+    try:
+        # Try with openpyxl first (for .xlsx files)
+        if OPENPYXL_AVAILABLE:
+            try:
+                return pd.read_excel(file, engine='openpyxl')
+            except Exception as e:
+                logger.warning(f"openpyxl failed: {e}")
+        
+        # Try with xlrd (for .xls files)
+        if XLRD_AVAILABLE:
+            try:
+                return pd.read_excel(file, engine='xlrd')
+            except Exception as e:
+                logger.warning(f"xlrd failed: {e}")
+        
+        # Try with default engine
+        try:
+            return pd.read_excel(file)
+        except Exception as e:
+            logger.warning(f"default engine failed: {e}")
+        
+        # If all else fails, try with specific engine based on file extension
+        file_name = file.name.lower()
+        if file_name.endswith('.xlsx'):
+            if OPENPYXL_AVAILABLE:
+                return pd.read_excel(file, engine='openpyxl')
+            else:
+                raise Exception("openpyxl is required for .xlsx files but not available")
+        elif file_name.endswith('.xls'):
+            if XLRD_AVAILABLE:
+                return pd.read_excel(file, engine='xlrd')
+            else:
+                raise Exception("xlrd is required for .xls files but not available")
+        else:
+            raise Exception("Unsupported file format")
+            
+    except Exception as e:
+        raise Exception(f"Failed to read Excel file: {e}")
 
 class PDFExtractor:
     """PDF extraction functionality with fallback methods"""
@@ -449,6 +502,16 @@ def main():
         2. Process PDFs locally and upload the extracted data as Excel files
         """)
     
+    # Show Excel reading capabilities
+    if not OPENPYXL_AVAILABLE and not XLRD_AVAILABLE:
+        st.error("""
+        ❌ **Excel Reading Libraries Not Available**
+        
+        Required libraries for reading Excel files are not installed. Please ensure the following are available:
+        - openpyxl (for .xlsx files)
+        - xlrd (for .xls files)
+        """)
+    
     # Initialize session state
     if 'step' not in st.session_state:
         st.session_state.step = 1
@@ -496,7 +559,7 @@ def main():
             
             if product_variants_file:
                 try:
-                    df = pd.read_excel(product_variants_file)
+                    df = read_excel_file(product_variants_file)
                     st.session_state.product_variants = df
                     st.success(f"✅ Product Variants loaded: {len(df)} products")
                     st.dataframe(df.head(), use_container_width=True)
@@ -512,7 +575,7 @@ def main():
             
             if store_names_file:
                 try:
-                    df = pd.read_excel(store_names_file)
+                    df = read_excel_file(store_names_file)
                     st.session_state.store_names = df
                     st.success(f"✅ Store Names loaded: {len(df)} stores")
                     st.dataframe(df.head(), use_container_width=True)
@@ -556,7 +619,7 @@ def main():
                             st.info(f"Processing file {i+1}/{len(uploaded_files)}: {uploaded_file.name}")
                             
                             try:
-                                df = pd.read_excel(uploaded_file)
+                                df = read_excel_file(uploaded_file)
                                 all_data.append(df)
                                 
                             except Exception as e:
