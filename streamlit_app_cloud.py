@@ -411,7 +411,7 @@ class OdooConverter:
                             'Original Order Quantity': row['# of Order'],
                             'Total Units': total_units,
                             'Unit Price': unit_price,
-                            'Total Price': row['Price'],
+                            'Total Price': total_units * unit_price,
                             'Is Multi Product': False
                         })
                     except Exception as e:
