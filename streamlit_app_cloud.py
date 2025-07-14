@@ -1,20 +1,16 @@
 #!/usr/bin/env python3
 """
-T&T Purchase Order Processor - Streamlit Cloud Compatible Version
-Combines PDF extraction and Odoo conversion into a single online application.
-Optimized for Streamlit Cloud deployment.
+T&T Purchase Order Processor - Simplified Version
+Upload purchase_orders.xlsx and convert to Odoo format.
 """
 
 import streamlit as st
 import pandas as pd
-import re
 import numpy as np
 from datetime import datetime
 import logging
 from typing import Dict, List, Tuple, Optional
 from io import BytesIO, StringIO
-import tempfile
-import os
 import subprocess
 import sys
 
@@ -35,16 +31,6 @@ def install_package(package):
 if not install_package("openpyxl"):
     st.error("Failed to install openpyxl. Please check your requirements.txt file.")
 
-if not install_package("xlrd"):
-    st.error("Failed to install xlrd. Please check your requirements.txt file.")
-
-# Try to import pdfplumber, fallback to alternative if not available
-try:
-    import pdfplumber
-    PDFPLUMBER_AVAILABLE = True
-except ImportError:
-    PDFPLUMBER_AVAILABLE = False
-
 # Try to import Excel reading libraries
 try:
     import openpyxl
@@ -52,13 +38,6 @@ try:
 except ImportError:
     OPENPYXL_AVAILABLE = False
     st.error("openpyxl is not available. Please ensure it's in your requirements.txt file.")
-
-try:
-    import xlrd
-    XLRD_AVAILABLE = True
-except ImportError:
-    XLRD_AVAILABLE = False
-    st.error("xlrd is not available. Please ensure it's in your requirements.txt file.")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -82,7 +61,7 @@ st.markdown("""
         text-align: center;
         margin-bottom: 2rem;
     }
-    .step-header {
+    .section-header {
         font-size: 1.5rem;
         font-weight: bold;
         color: #2c3e50;
@@ -125,13 +104,6 @@ def read_excel_file(file) -> pd.DataFrame:
             except Exception as e:
                 logger.warning(f"openpyxl failed: {e}")
         
-        # Try with xlrd (for .xls files)
-        if XLRD_AVAILABLE:
-            try:
-                return pd.read_excel(file, engine='xlrd')
-            except Exception as e:
-                logger.warning(f"xlrd failed: {e}")
-        
         # Try with default engine
         try:
             return pd.read_excel(file)
@@ -145,11 +117,6 @@ def read_excel_file(file) -> pd.DataFrame:
                 return pd.read_excel(file, engine='openpyxl')
             else:
                 raise Exception("openpyxl is required for .xlsx files but not available")
-        elif file_name.endswith('.xls'):
-            if XLRD_AVAILABLE:
-                return pd.read_excel(file, engine='xlrd')
-            else:
-                raise Exception("xlrd is required for .xls files but not available")
         else:
             raise Exception("Unsupported file format")
             
@@ -184,7 +151,7 @@ def validate_and_reorder_columns(df: pd.DataFrame, expected_columns: List[str]) 
         st.warning(f"⚠️ Some expected columns are missing: {missing_columns}")
         st.info("📋 Available columns: " + ", ".join(existing_columns))
         
-        # Handle common column mapping for PDF extraction
+        # Handle common column mapping
         if 'Internal Reference' not in existing_columns and 'Item#' in existing_columns:
             df['Internal Reference'] = df['Item#']
             st.info("✅ Mapped 'Item#' to 'Internal Reference'")
@@ -208,150 +175,6 @@ def validate_and_reorder_columns(df: pd.DataFrame, expected_columns: List[str]) 
         df = df[available_columns]
     
     return df
-
-class PDFExtractor:
-    """PDF extraction functionality with fallback methods"""
-    
-    @staticmethod
-    def validate_date(date_str: str) -> bool:
-        """Validate date format MM/DD/YYYY"""
-        try:
-            datetime.strptime(date_str, '%m/%d/%Y')
-            return True
-        except ValueError:
-            return False
-
-    @staticmethod
-    def validate_numeric(value: str, min_val: float = 0, max_val: float = float('inf')) -> bool:
-        """Validate numeric value within range"""
-        try:
-            num_val = float(value)
-            return min_val <= num_val <= max_val
-        except ValueError:
-            return False
-
-    @staticmethod
-    def extract_po_data(pdf_file) -> Tuple[List[Dict], List[str]]:
-        """Extract purchase order data from PDF with improved error handling and validation."""
-        data = []
-        current_po = {}
-        errors = []
-        
-        try:
-            if PDFPLUMBER_AVAILABLE:
-                # Use pdfplumber if available
-                with pdfplumber.open(pdf_file) as pdf:
-                    for page_num, page in enumerate(pdf.pages, 1):
-                        try:
-                            text = page.extract_text()
-                            if not text:
-                                logger.warning(f"No text extracted from page {page_num}")
-                                continue
-                                
-                            lines = text.split('\n')
-                            data, errors = PDFExtractor._process_lines(lines, current_po, data, errors, page_num)
-                                
-                        except Exception as e:
-                            errors.append(f"Error processing page {page_num}: {e}")
-                            continue
-                            
-            else:
-                # Fallback: Try to extract text using alternative method
-                st.error("❌ PDF processing is not available in this environment. Please use the standalone converter for PDF processing.")
-                return [], ["PDF processing not available in Streamlit Cloud environment"]
-                        
-        except Exception as e:
-            st.error(f"❌ Failed to open or process PDF: {e}")
-            raise Exception(f"Failed to open or process PDF: {e}")
-        
-        return data, errors
-
-    @staticmethod
-    def _process_lines(lines: List[str], current_po: Dict, data: List[Dict], errors: List[str], page_num: int) -> Tuple[List[Dict], List[str]]:
-        """Process lines from PDF text"""
-        po_found = False
-        items_found = 0
-        
-        for line_num, line in enumerate(lines, 1):
-            try:
-                # Extract PO Number with improved pattern
-                if po_match := re.search(r'PO No\.:\s*(\d+)', line):
-                    current_po['PO No.'] = po_match.group(1)
-                    po_found = True
-                
-                # Extract Store Name and Store ID with exact pattern from working version
-                if store_match := re.search(r'Store :\s*(.*?)\s*-\s*(\d{3})\b', line):
-                    current_po['Store Name'] = store_match.group(1).strip()
-                    current_po['Store ID'] = store_match.group(2)
-                
-                # Extract Dates with exact patterns from working version
-                if order_date_match := re.search(r'Order Date :\s*(\d{2}/\d{2}/\d{4})', line):
-                    current_po['Order Date'] = order_date_match.group(1)
-                    
-                if delivery_date_match := re.search(r'Delivery Date \(on or before\) :\s*(\d{2}/\d{2}/\d{4})', line):
-                    current_po['Delivery Date'] = delivery_date_match.group(1)
-                
-                # Parse item lines with improved validation
-                # Look for lines that start with exactly 6 digits (Item#)
-                if 'PO No.' in current_po and re.match(r'^\d{6}\b', line.strip()):
-                    parts = line.strip().split()
-                    
-                    # Find numeric values with exactly 2 decimal places (as in working version)
-                    numeric_values = [part for part in parts if re.match(r'^\d+\.\d{2}$', part)]
-                    
-                    if len(numeric_values) >= 3:
-                        try:
-                            # Based on working po_extract.py logic:
-                            # numeric_values[-3] = Quantity (third from end)
-                            # numeric_values[-2] = Price (second from end)
-                            # numeric_values[-1] = Total (last)
-                            
-                            ordered_qty = float(numeric_values[-3])  # Third from end
-                            price = float(numeric_values[-2])        # Second from end
-                            
-                            # Validate quantities and prices
-                            if not PDFExtractor.validate_numeric(str(ordered_qty), 0, 1000000):
-                                errors.append(f"Invalid quantity: {ordered_qty} on line {line_num}")
-                                continue
-                                
-                            if not PDFExtractor.validate_numeric(str(price), 0, 1000000):
-                                errors.append(f"Invalid price: {price} on line {line_num}")
-                                continue
-                            
-                            data.append({
-                                'PO No.': current_po['PO No.'],
-                                'Store ID': current_po.get('Store ID', ''),
-                                'Store Name': current_po.get('Store Name', ''),
-                                'Order Date': current_po.get('Order Date', ''),
-                                'Delivery Date': current_po.get('Delivery Date', ''),
-                                'Item#': parts[0],
-                                'Ordered Qty': ordered_qty,
-                                'Price': price
-                            })
-                            
-                            items_found += 1
-                            
-                        except (ValueError, IndexError) as e:
-                            errors.append(f"Error parsing numeric values on line {line_num}: {e}")
-                    else:
-                        # Only show debugging for problematic lines if no items found yet
-                        if items_found == 0:
-                            st.warning(f"⚠️ Line parsing issue on line {line_num}: '{line.strip()}'")
-                            st.info(f"📊 Found {len(numeric_values)} numeric values: {numeric_values}")
-                            st.info(f"📋 Line parts: {parts}")
-                        errors.append(f"Insufficient numeric values on line {line_num}: found {len(numeric_values)}, expected at least 3")
-                            
-            except Exception as e:
-                errors.append(f"Error processing line {line_num}: {e}")
-                continue
-        
-        # Only show warnings if no data was found
-        if not po_found:
-            st.warning("⚠️ No PO Number found in the PDF")
-        if items_found == 0:
-            st.warning("⚠️ No item lines found in the PDF")
-            
-        return data, errors
 
 class OdooConverter:
     """Odoo conversion functionality"""
@@ -574,527 +397,269 @@ def main():
     st.markdown('<h1 class="main-header">🛒 T&T Purchase Order Processor</h1>', unsafe_allow_html=True)
     st.markdown("---")
     
-    # Show environment info
-    if not PDFPLUMBER_AVAILABLE:
-        st.warning("""
-        ⚠️ **Streamlit Cloud Environment Detected**
-        
-        PDF processing is limited in this environment. For full PDF processing capabilities, please:
-        1. Use the local version of this application, or
-        2. Process PDFs locally and upload the extracted data as Excel files
-        """)
+    st.info("📋 Upload your files to convert purchase orders to Odoo format")
     
-    # Show Excel reading capabilities
-    if not OPENPYXL_AVAILABLE and not XLRD_AVAILABLE:
-        st.error("""
-        ❌ **Excel Reading Libraries Not Available**
-        
-        Required libraries for reading Excel files are not installed. Please ensure the following are available:
-        - openpyxl (for .xlsx files)
-        - xlrd (for .xls files)
-        
-        **Alternative: You can convert your Excel files to CSV format and upload them instead.**
-        """)
-        
-        # Show CSV upload option as alternative
-        st.info("""
-        📄 **CSV Upload Alternative**
-        
-        If Excel files are not working, you can:
-        1. Open your Excel files in a spreadsheet application
-        2. Save them as CSV files (File → Save As → CSV)
-        3. Upload the CSV files instead
-        """)
+    # File uploads in columns
+    col1, col2, col3 = st.columns(3)
     
-    # Initialize session state
-    if 'step' not in st.session_state:
-        st.session_state.step = 1
-    if 'purchase_orders' not in st.session_state:
-        st.session_state.purchase_orders = None
-    if 'product_variants' not in st.session_state:
-        st.session_state.product_variants = None
-    if 'store_names' not in st.session_state:
-        st.session_state.store_names = None
-    if 'extraction_errors' not in st.session_state:
-        st.session_state.extraction_errors = []
-    if 'conversion_errors' not in st.session_state:
-        st.session_state.conversion_errors = []
-    if 'pdf_processing_completed' not in st.session_state:
-        st.session_state.pdf_processing_completed = False
-    
-    # Sidebar for navigation
-    st.sidebar.title("📋 Processing Steps")
-    
-    # Step indicators
-    steps = ["1. Upload Reference Data", "2. Upload Data", "3. Process & Convert", "4. Download Results"]
-    
-    for i, step_name in enumerate(steps, 1):
-        if i == st.session_state.step:
-            st.sidebar.markdown(f"**{step_name}** ✅")
-        elif i < st.session_state.step:
-            st.sidebar.markdown(f"~~{step_name}~~ ✅")
+    with col1:
+        st.markdown('<h3 class="section-header">📦 Product Variants</h3>', unsafe_allow_html=True)
+        
+        # File type selection
+        product_file_type = st.radio(
+            "Select file type:",
+            ["Excel (.xlsx)", "CSV (.csv)"],
+            key="product_variants_type"
+        )
+        
+        if product_file_type == "Excel (.xlsx)":
+            product_variants_file = st.file_uploader(
+                "Upload Product Variants file",
+                type=['xlsx'],
+                key="product_variants"
+            )
         else:
-            st.sidebar.markdown(f"{step_name}")
-    
-    st.sidebar.markdown("---")
-    
-    # Step 1: Upload Reference Data
-    if st.session_state.step == 1:
-        st.markdown('<h2 class="step-header">Step 1: Upload Reference Data</h2>', unsafe_allow_html=True)
-        
-        st.info("📁 Please upload the required reference files before processing data.")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.subheader("📦 Product Variants")
-            
-            # File type selection
-            file_type = st.radio(
-                "Select file type:",
-                ["Excel (.xlsx/.xls)", "CSV (.csv)"],
-                key="product_variants_type"
+            product_variants_file = st.file_uploader(
+                "Upload Product Variants file",
+                type=['csv'],
+                key="product_variants"
             )
-            
-            if file_type == "Excel (.xlsx/.xls)":
-                product_variants_file = st.file_uploader(
-                    "Upload Product Variant Excel file",
-                    type=['xlsx', 'xls']
-                )
-            else:
-                product_variants_file = st.file_uploader(
-                    "Upload Product Variant CSV file",
-                    type=['csv']
-                )
-            
-            if product_variants_file:
-                try:
-                    if file_type == "Excel (.xlsx/.xls)":
-                        df = read_excel_file(product_variants_file)
-                    else:
-                        df = read_csv_file(product_variants_file)
-                    
-                    if df.empty:
-                        st.error("❌ Product Variants file is empty")
-                        return
-                    
-                    st.session_state.product_variants = df
-                    st.dataframe(df.head(), use_container_width=True)
-                except Exception as e:
-                    st.error(f"❌ Error loading Product Variants: {e}")
         
-        with col2:
-            st.subheader("🏪 T&T Store Names")
-            
-            # File type selection
-            file_type2 = st.radio(
-                "Select file type:",
-                ["Excel (.xlsx/.xls)", "CSV (.csv)"],
-                key="store_names_type"
-            )
-            
-            if file_type2 == "Excel (.xlsx/.xls)":
-                store_names_file = st.file_uploader(
-                    "Upload T&T Store Names Excel file",
-                    type=['xlsx', 'xls']
-                )
-            else:
-                store_names_file = st.file_uploader(
-                    "Upload T&T Store Names CSV file",
-                    type=['csv']
-                )
-            
-            if store_names_file:
-                try:
-                    if file_type2 == "Excel (.xlsx/.xls)":
-                        df = read_excel_file(store_names_file)
-                    else:
-                        df = read_csv_file(store_names_file)
-                    
-                    st.session_state.store_names = df
-                    st.dataframe(df.head(), use_container_width=True)
-                except Exception as e:
-                    st.error(f"❌ Error loading Store Names: {e}")
-        
-        # Navigation buttons
-        col1, col2, col3 = st.columns([1, 1, 1])
-        with col2:
-            if st.session_state.product_variants is not None and st.session_state.store_names is not None:
-                if st.button("Next Step →", type="primary"):
-                    st.session_state.step = 2
-                    st.session_state.pdf_processing_completed = False  # Reset PDF processing flag
-                    st.rerun()
-            else:
-                st.button("Next Step →", disabled=True)
+        product_variants = None
+        if product_variants_file:
+            try:
+                if product_file_type == "Excel (.xlsx)":
+                    product_variants = read_excel_file(product_variants_file)
+                else:
+                    product_variants = read_csv_file(product_variants_file)
+                
+                if not product_variants.empty:
+                    st.success(f"✅ Loaded {len(product_variants)} products")
+                    st.dataframe(product_variants.head(3), use_container_width=True)
+                else:
+                    st.error("❌ File is empty")
+            except Exception as e:
+                st.error(f"❌ Error loading file: {e}")
     
-    # Step 2: Upload Data
-    elif st.session_state.step == 2:
-        st.markdown('<h2 class="step-header">Step 2: Upload Data</h2>', unsafe_allow_html=True)
+    with col2:
+        st.markdown('<h3 class="section-header">🏪 Store Names</h3>', unsafe_allow_html=True)
         
-        if not PDFPLUMBER_AVAILABLE:
-            st.info("📄 Upload extracted purchase order data as Excel or CSV files (PDF processing not available in this environment).")
-            
-            # File type selection
-            file_type = st.radio(
-                "Select file type:",
-                ["Excel (.xlsx/.xls)", "CSV (.csv)"],
-                key="data_upload_type"
+        # File type selection
+        store_file_type = st.radio(
+            "Select file type:",
+            ["Excel (.xlsx)", "CSV (.csv)"],
+            key="store_names_type"
+        )
+        
+        if store_file_type == "Excel (.xlsx)":
+            store_names_file = st.file_uploader(
+                "Upload Store Names file",
+                type=['xlsx'],
+                key="store_names"
             )
-            
-            if file_type == "Excel (.xlsx/.xls)":
-                uploaded_files = st.file_uploader(
-                    "Upload Purchase Order Excel files",
-                    type=['xlsx', 'xls'],
-                    accept_multiple_files=True,
-                    help="Upload Excel files containing extracted purchase order data"
-                )
-            else:
-                uploaded_files = st.file_uploader(
-                    "Upload Purchase Order CSV files",
-                    type=['csv'],
-                    accept_multiple_files=True,
-                    help="Upload CSV files containing extracted purchase order data"
-                )
-            
-            if uploaded_files:
-                # Reset processing flag when new files are uploaded
-                st.session_state.pdf_processing_completed = False
-                
-                # Show file details
-                file_details = []
-                for i, file in enumerate(uploaded_files, 1):
-                    file_details.append({
-                        "File": f"{i}. {file.name}",
-                        "Size": f"{file.size / 1024:.1f} KB"
-                    })
-                
-                st.dataframe(pd.DataFrame(file_details), use_container_width=True)
-                
-                # Process files
-                if st.button("Process Files", type="primary"):
-                    with st.spinner("Processing files..."):
-                        all_data = []
-                        all_errors = []
-                        
-                        for i, uploaded_file in enumerate(uploaded_files):
-                            st.info(f"Processing file {i+1}/{len(uploaded_files)}: {uploaded_file.name}")
-                            
-                            try:
-                                if file_type == "Excel (.xlsx/.xls)":
-                                    df = read_excel_file(uploaded_file)
-                                else:
-                                    df = read_csv_file(uploaded_file)
-                                
-                                all_data.append(df)
-                                
-                            except Exception as e:
-                                all_errors.append(f"{uploaded_file.name}: {e}")
-                        
-                        if all_data:
-                            # Combine all dataframes
-                            combined_df = pd.concat(all_data, ignore_index=True)
-                            
-                            # Clean column names
-                            combined_df.columns = combined_df.columns.str.strip()
-                            if '# of Order ' in combined_df.columns:
-                                combined_df = combined_df.rename(columns={'# of Order ': '# of Order'})
-                            
-                            # Convert to numeric for proper sorting
-                            combined_df['Store ID'] = pd.to_numeric(combined_df['Store ID'], errors='coerce')
-                            combined_df['PO No.'] = pd.to_numeric(combined_df['PO No.'], errors='coerce')
-                            
-                            # Sort by Store ID and PO No.
-                            combined_df = combined_df.sort_values(by=['Store ID', 'PO No.'], ascending=[True, True])
-                            
-                            # Validate and reorder columns
-                            expected_columns = ['Store ID', 'Store Name', 'PO No.', 'Order Date', 'Delivery Date',
-                                              'Internal Reference', '# of Order', 'Price']
-                            combined_df = validate_and_reorder_columns(combined_df, expected_columns)
-                            
-                            st.session_state.purchase_orders = combined_df
-                            st.session_state.extraction_errors = all_errors
-                            
-                            # Show preview
-                            with st.expander("📊 Preview of Loaded Data", expanded=True):
-                                st.dataframe(combined_df.head(20), use_container_width=True)
-                            
-                            # Show errors if any
-                            if all_errors:
-                                with st.expander("⚠️ Processing Warnings", expanded=False):
-                                    for error in all_errors[:10]:
-                                        st.warning(error)
-                                    if len(all_errors) > 10:
-                                        st.info(f"... and {len(all_errors) - 10} more warnings")
-                            
-                            # Navigation
-                            col1, col2, col3 = st.columns([1, 1, 1])
-                            with col2:
-                                if st.button("Next Step →", type="primary"):
-                                    st.session_state.step = 3
-                                    st.rerun()
-                        else:
-                            st.error("❌ No valid data found in the uploaded files.")
         else:
-            st.info("📄 Upload T&T Purchase Order PDF files for processing.")
-            
-            uploaded_files = st.file_uploader(
-                "Upload T&T PO PDF files",
-                type="pdf",
-                accept_multiple_files=True,
-                help="Select one or more PDF files containing T&T purchase order data"
+            store_names_file = st.file_uploader(
+                "Upload Store Names file",
+                type=['csv'],
+                key="store_names"
             )
-            
-            if uploaded_files:
-                # Reset processing flag when new files are uploaded
-                st.session_state.pdf_processing_completed = False
+        
+        store_names = None
+        if store_names_file:
+            try:
+                if store_file_type == "Excel (.xlsx)":
+                    store_names = read_excel_file(store_names_file)
+                else:
+                    store_names = read_csv_file(store_names_file)
                 
-                # Show file details
-                file_details = []
-                for i, file in enumerate(uploaded_files, 1):
-                    file_details.append({
-                        "File": f"{i}. {file.name}",
-                        "Size": f"{file.size / 1024:.1f} KB"
-                    })
+                if not store_names.empty:
+                    st.success(f"✅ Loaded {len(store_names)} stores")
+                    st.dataframe(store_names.head(3), use_container_width=True)
+                else:
+                    st.error("❌ File is empty")
+            except Exception as e:
+                st.error(f"❌ Error loading file: {e}")
+    
+    with col3:
+        st.markdown('<h3 class="section-header">🛒 Purchase Orders</h3>', unsafe_allow_html=True)
+        
+        # File type selection
+        orders_file_type = st.radio(
+            "Select file type:",
+            ["Excel (.xlsx)", "CSV (.csv)"],
+            key="purchase_orders_type"
+        )
+        
+        if orders_file_type == "Excel (.xlsx)":
+            purchase_orders_file = st.file_uploader(
+                "Upload Purchase Orders file",
+                type=['xlsx'],
+                key="purchase_orders"
+            )
+        else:
+            purchase_orders_file = st.file_uploader(
+                "Upload Purchase Orders file",
+                type=['csv'],
+                key="purchase_orders"
+            )
+        
+        purchase_orders = None
+        if purchase_orders_file:
+            try:
+                if orders_file_type == "Excel (.xlsx)":
+                    purchase_orders = read_excel_file(purchase_orders_file)
+                else:
+                    purchase_orders = read_csv_file(purchase_orders_file)
                 
-                st.dataframe(pd.DataFrame(file_details), use_container_width=True)
-                
-                # Process PDFs
-                if st.button("Process PDF Files", type="primary"):
-                    with st.spinner("Processing PDF files..."):
-                        all_data = []
-                        all_errors = []
-                        
-                        for i, uploaded_file in enumerate(uploaded_files):
-                            st.info(f"Processing file {i+1}/{len(uploaded_files)}: {uploaded_file.name}")
-                            
-                            try:
-                                data, errors = PDFExtractor.extract_po_data(BytesIO(uploaded_file.getvalue()))
-                                all_data.extend(data)
-                                all_errors.extend([f"{uploaded_file.name}: {error}" for error in errors])
-                                
-                            except Exception as e:
-                                all_errors.append(f"{uploaded_file.name}: {e}")
-                        
-                        if all_data:
-                            # Create DataFrame and process
-                            df = pd.DataFrame(all_data)
-                            
-                            # Clean column names
-                            df.columns = df.columns.str.strip()
-                            if '# of Order ' in df.columns:
-                                df = df.rename(columns={'# of Order ': '# of Order'})
-                            
-                            # Convert to numeric for proper sorting
-                            df['Store ID'] = pd.to_numeric(df['Store ID'], errors='coerce')
-                            df['PO No.'] = pd.to_numeric(df['PO No.'], errors='coerce')
-                            
-                            # Sort by Store ID and PO No.
-                            df = df.sort_values(by=['Store ID', 'PO No.'], ascending=[True, True])
-                            
-                            # Validate and reorder columns
-                            expected_columns = ['Store ID', 'Store Name', 'PO No.', 'Order Date', 'Delivery Date',
-                                              'Internal Reference', '# of Order', 'Price']
-                            df = validate_and_reorder_columns(df, expected_columns)
-                            
-                            st.session_state.purchase_orders = df
-                            st.session_state.extraction_errors = all_errors
-                        else:
-                            st.error("❌ No valid purchase order data found in the uploaded files.")
-                            # Set empty dataframe so user can still proceed if needed
-                            st.session_state.purchase_orders = pd.DataFrame()
-                            st.session_state.extraction_errors = all_errors
-                        
-                        # Mark processing as completed
-                        st.session_state.pdf_processing_completed = True
-                
-                # Show results and navigation only after processing is completed
-                if st.session_state.get('pdf_processing_completed', False):
-                    # Show preview if data exists
-                    if st.session_state.purchase_orders is not None and not st.session_state.purchase_orders.empty:
-                        with st.expander("📊 Preview of Extracted Data", expanded=True):
-                            st.dataframe(st.session_state.purchase_orders.head(20), use_container_width=True)
+                if not purchase_orders.empty:
+                    # Clean column names
+                    purchase_orders.columns = purchase_orders.columns.str.strip()
+                    if '# of Order ' in purchase_orders.columns:
+                        purchase_orders = purchase_orders.rename(columns={'# of Order ': '# of Order'})
+                    
+                    # Convert to numeric for proper sorting
+                    purchase_orders['Store ID'] = pd.to_numeric(purchase_orders['Store ID'], errors='coerce')
+                    purchase_orders['PO No.'] = pd.to_numeric(purchase_orders['PO No.'], errors='coerce')
+                    
+                    # Sort by Store ID and PO No.
+                    purchase_orders = purchase_orders.sort_values(by=['Store ID', 'PO No.'], ascending=[True, True])
+                    
+                    # Validate and reorder columns
+                    expected_columns = ['Store ID', 'Store Name', 'PO No.', 'Order Date', 'Delivery Date',
+                                      'Internal Reference', '# of Order', 'Price']
+                    purchase_orders = validate_and_reorder_columns(purchase_orders, expected_columns)
+                    
+                    st.success(f"✅ Loaded {len(purchase_orders)} orders")
+                    st.dataframe(purchase_orders.head(3), use_container_width=True)
+                else:
+                    st.error("❌ File is empty")
+            except Exception as e:
+                st.error(f"❌ Error loading file: {e}")
+    
+    # Processing section
+    st.markdown("---")
+    st.markdown('<h2 class="section-header">🔄 Process & Convert</h2>', unsafe_allow_html=True)
+    
+    # Check if all files are uploaded
+    if product_variants is not None and store_names is not None and purchase_orders is not None:
+        if st.button("🚀 Convert to Odoo Format", type="primary", use_container_width=True):
+            with st.spinner("Converting to Odoo format..."):
+                try:
+                    # Initialize converter
+                    converter = OdooConverter(purchase_orders, product_variants, store_names)
+                    
+                    # Process conversion
+                    order_summaries, order_line_details, errors = converter.process_all()
+                    
+                    # Display results
+                    st.success("✅ Conversion completed successfully!")
+                    
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("Total Stores", len(order_summaries))
+                    with col2:
+                        st.metric("Total Order Lines", len(order_line_details))
+                    with col3:
+                        st.metric("Total Value", f"${order_line_details['Total Price'].sum():,.2f}")
+                    with col4:
+                        st.metric("Average Order Value", f"${order_line_details['Total Price'].mean():,.2f}")
+                    
+                    # Show order summaries
+                    with st.expander("📋 Order Summaries", expanded=True):
+                        st.dataframe(order_summaries, use_container_width=True)
+                    
+                    # Show order line details
+                    with st.expander("📊 Order Line Details (First 20 rows)", expanded=False):
+                        st.dataframe(order_line_details.head(20), use_container_width=True)
                     
                     # Show errors if any
-                    if st.session_state.get('extraction_errors', []):
-                        with st.expander("⚠️ Processing Warnings", expanded=False):
-                            errors = st.session_state.extraction_errors
+                    if errors:
+                        with st.expander("⚠️ Conversion Warnings", expanded=False):
                             for error in errors[:10]:
                                 st.warning(error)
                             if len(errors) > 10:
                                 st.info(f"... and {len(errors) - 10} more warnings")
                     
-                    # Navigation - always show after processing
-                    col1, col2, col3 = st.columns([1, 1, 1])
-                    with col2:
-                        if st.button("Next Step →", type="primary"):
-                            st.session_state.step = 3
-                            st.rerun()
-        
-        # Back button
-        col1, col2, col3 = st.columns([1, 1, 1])
-        with col1:
-            if st.button("← Back"):
-                st.session_state.step = 2
-                st.session_state.pdf_processing_completed = False  # Reset PDF processing flag
-                st.rerun()
-    
-    # Step 3: Process & Convert
-    elif st.session_state.step == 3:
-        st.markdown('<h2 class="step-header">Step 3: Process & Convert to Odoo Format</h2>', unsafe_allow_html=True)
-        
-        if st.session_state.purchase_orders is not None and not st.session_state.purchase_orders.empty:
-            st.info("🔄 Converting data to Odoo-compatible format...")
-            
-            if st.button("Start Conversion", type="primary"):
-                with st.spinner("Converting to Odoo format..."):
-                    try:
-                        # Initialize converter
-                        converter = OdooConverter(
-                            st.session_state.purchase_orders,
-                            st.session_state.product_variants,
-                            st.session_state.store_names
-                        )
+                    # Create Excel file for download
+                    with st.spinner("Preparing download file..."):
+                        excel_buffer = BytesIO()
                         
-                        # Process conversion
-                        order_summaries, order_line_details, errors = converter.process_all()
+                        with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                            # Save order summaries
+                            order_summaries.to_excel(writer, sheet_name='Order Summaries', index=False)
+                            
+                            # Save order line details
+                            order_line_details.to_excel(writer, sheet_name='Order Line Details', index=False)
+                            
+                            # Save original data for reference
+                            purchase_orders.to_excel(writer, sheet_name='Original Purchase Orders', index=False)
+                            product_variants.to_excel(writer, sheet_name='Product Variants', index=False)
+                            store_names.to_excel(writer, sheet_name='Store Names', index=False)
                         
-                        st.session_state.order_summaries = order_summaries
-                        st.session_state.order_line_details = order_line_details
-                        st.session_state.conversion_errors = errors
-                        
-                        # Display results
-                        col1, col2, col3, col4 = st.columns(4)
-                        with col1:
-                            st.metric("Total Stores", len(order_summaries))
-                        with col2:
-                            st.metric("Total Order Lines", len(order_line_details))
-                        with col3:
-                            st.metric("Total Value", f"${order_line_details['Total Price'].sum():,.2f}")
-                        with col4:
-                            st.metric("Average Order Value", f"${order_line_details['Total Price'].mean():,.2f}")
-                        
-                        # Show order summaries
-                        with st.expander("📋 Order Summaries", expanded=True):
-                            st.dataframe(order_summaries, use_container_width=True)
-                        
-                        # Show order line details
-                        with st.expander("📊 Order Line Details (First 20 rows)", expanded=False):
-                            st.dataframe(order_line_details.head(20), use_container_width=True)
-                        
-                        # Show errors if any
-                        if errors:
-                            with st.expander("⚠️ Conversion Warnings", expanded=False):
-                                for error in errors[:10]:
-                                    st.warning(error)
-                                if len(errors) > 10:
-                                    st.info(f"... and {len(errors) - 10} more warnings")
-                        
-                        # Navigation
-                        col1, col2, col3 = st.columns([1, 1, 1])
-                        with col2:
-                            if st.button("Next Step →", type="primary"):
-                                st.session_state.step = 4
-                                st.rerun()
+                        excel_buffer.seek(0)
                     
-                    except Exception as e:
-                        st.error(f"❌ Error during conversion: {e}")
-        else:
-            st.warning("⚠️ No purchase order data available for conversion.")
-            st.info("Please go back to Step 2 and ensure PDF files are processed successfully.")
-            
-            # Show option to skip conversion if needed
-            st.markdown("---")
-            col1, col2 = st.columns([1, 1])
-            with col1:
-                st.info("You can still proceed to download any reference data files.")
-            with col2:
-                if st.button("Skip Conversion →", type="secondary"):
-                    st.session_state.step = 4
-                    st.rerun()
-        
-        # Back button
-        col1, col2, col3 = st.columns([1, 1, 1])
-        with col1:
-            if st.button("← Back"):
-                st.session_state.step = 2
-                st.rerun()
-    
-    # Step 4: Download Results
-    elif st.session_state.step == 4:
-        st.markdown('<h2 class="step-header">Step 4: Download Results</h2>', unsafe_allow_html=True)
-        
-        if st.session_state.order_summaries is not None and st.session_state.order_line_details is not None:
-            # Create Excel file
-            with st.spinner("Preparing download file..."):
-                excel_buffer = BytesIO()
+                    # Download section
+                    st.markdown("---")
+                    st.markdown('<h2 class="section-header">📥 Download Results</h2>', unsafe_allow_html=True)
+                    
+                    # Download button
+                    st.download_button(
+                        label="📥 Download Odoo_Import_Ready.xlsx",
+                        data=excel_buffer.getvalue(),
+                        file_name="Odoo_Import_Ready.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        type="primary",
+                        use_container_width=True
+                    )
+                    
+                    st.info("📋 The downloaded file contains:")
+                    st.markdown("""
+                    - **Order Summaries**: Summary of orders by store
+                    - **Order Line Details**: Detailed product lines for Odoo import
+                    - **Original Purchase Orders**: Raw extracted data
+                    - **Product Variants**: Reference product data
+                    - **Store Names**: Reference store data
+                    """)
                 
-                with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                    # Save order summaries
-                    st.session_state.order_summaries.to_excel(writer, sheet_name='Order Summaries', index=False)
-                    
-                    # Save order line details
-                    st.session_state.order_line_details.to_excel(writer, sheet_name='Order Line Details', index=False)
-                    
-                    # Save original data for reference
-                    st.session_state.purchase_orders.to_excel(writer, sheet_name='Original Purchase Orders', index=False)
-                    st.session_state.product_variants.to_excel(writer, sheet_name='Product Variants', index=False)
-                    st.session_state.store_names.to_excel(writer, sheet_name='Store Names', index=False)
-                
-                excel_buffer.seek(0)
-            
-            # Download button
-            st.download_button(
-                label="📥 Download Odoo Import Ready File",
-                data=excel_buffer.getvalue(),
-                file_name="Odoo_Import_Ready.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                type="primary"
-            )
-            
-            st.info("📋 The downloaded file contains:")
-            st.markdown("""
-            - **Order Summaries**: Summary of orders by store
-            - **Order Line Details**: Detailed product lines for Odoo import
-            - **Original Purchase Orders**: Raw extracted data
-            - **Product Variants**: Reference product data
-            - **Store Names**: Reference store data
-            """)
-            
-            # Start over button
-            col1, col2, col3 = st.columns([1, 1, 1])
-            with col2:
-                if st.button("🔄 Start Over", type="secondary"):
-                    # Reset session state
-                    for key in ['step', 'purchase_orders', 'product_variants', 'store_names', 
-                               'order_summaries', 'order_line_details', 'extraction_errors', 'conversion_errors']:
-                        if key in st.session_state:
-                            del st.session_state[key]
-                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Error during conversion: {e}")
+                    st.error("Please check your file formats and try again.")
+    
+    else:
+        st.info("📋 Please upload all three files to proceed with conversion")
         
-        # Back button
-        col1, col2, col3 = st.columns([1, 1, 1])
-        with col1:
-            if st.button("← Back"):
-                st.session_state.step = 3
-                st.rerun()
+        missing_files = []
+        if product_variants is None:
+            missing_files.append("Product Variants")
+        if store_names is None:
+            missing_files.append("Store Names")
+        if purchase_orders is None:
+            missing_files.append("Purchase Orders")
+        
+        if missing_files:
+            st.warning(f"⚠️ Missing files: {', '.join(missing_files)}")
     
     # Help section
-    with st.sidebar.expander("ℹ️ Help & Instructions"):
+    with st.sidebar:
+        st.markdown("## ℹ️ Help & Instructions")
         st.markdown("""
         **How to use this tool:**
         
-        1. **Upload Reference Data**: Upload Product Variants and Store Names files
-        2. **Upload Data**: Upload PDF files or Excel/CSV files with extracted data
-        3. **Process & Convert**: Convert to Odoo-compatible format
-        4. **Download Results**: Get your Odoo Import Ready file
+        1. **Upload Files**: Upload all three required files
+           - Product Variants (Excel/CSV)
+           - Store Names (Excel/CSV)
+           - Purchase Orders (Excel/CSV)
         
-        **Required Files:**
-        - Product Variant Excel/CSV file
-        - T&T Store Names Excel/CSV file
-        - T&T Purchase Order PDF files (or Excel/CSV files with extracted data)
+        2. **Convert**: Click "Convert to Odoo Format" button
+        
+        3. **Download**: Download the "Odoo_Import_Ready.xlsx" file
+        
+        **Required File Formats:**
+        - **Product Variants**: Must contain columns like 'Internal Reference', 'Barcode', 'Name', 'Units Per Order'
+        - **Store Names**: Must contain 'Store ID' and 'Store Official Name'
+        - **Purchase Orders**: Must contain 'Store ID', 'Store Name', 'PO No.', 'Order Date', 'Delivery Date', 'Internal Reference', '# of Order', 'Price'
         
         **Features:**
-        - Multi-file processing
         - Automatic product mapping
         - Multi-product reference handling
         - Comprehensive error reporting
