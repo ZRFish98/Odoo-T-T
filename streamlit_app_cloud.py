@@ -241,34 +241,20 @@ class PDFExtractor:
             if PDFPLUMBER_AVAILABLE:
                 # Use pdfplumber if available
                 with pdfplumber.open(pdf_file) as pdf:
-                    st.info(f"📄 Processing PDF with {len(pdf.pages)} pages")
-                    
                     for page_num, page in enumerate(pdf.pages, 1):
                         try:
                             text = page.extract_text()
                             if not text:
                                 logger.warning(f"No text extracted from page {page_num}")
-                                st.warning(f"⚠️ No text extracted from page {page_num}")
                                 continue
                                 
                             lines = text.split('\n')
-                            st.info(f"📋 Page {page_num}: Found {len(lines)} lines")
-                            
-                            # Debug: Show first few lines to understand the format
-                            if page_num == 1:
-                                st.info("🔍 First 10 lines of PDF:")
-                                for i, line in enumerate(lines[:10]):
-                                    st.write(f"  Line {i+1}: '{line}'")
-                            
                             data, errors = PDFExtractor._process_lines(lines, current_po, data, errors, page_num)
                                 
                         except Exception as e:
                             errors.append(f"Error processing page {page_num}: {e}")
-                            st.error(f"❌ Error processing page {page_num}: {e}")
                             continue
                             
-                    st.info(f"📊 PDF processing complete. Found {len(data)} data entries and {len(errors)} errors")
-                    
             else:
                 # Fallback: Try to extract text using alternative method
                 st.error("❌ PDF processing is not available in this environment. Please use the standalone converter for PDF processing.")
@@ -292,22 +278,18 @@ class PDFExtractor:
                 if po_match := re.search(r'PO No\.:\s*(\d+)', line):
                     current_po['PO No.'] = po_match.group(1)
                     po_found = True
-                    st.success(f"✅ Found PO No.: {po_match.group(1)} on line {line_num}")
                 
                 # Extract Store Name and Store ID with exact pattern from working version
                 if store_match := re.search(r'Store :\s*(.*?)\s*-\s*(\d{3})\b', line):
                     current_po['Store Name'] = store_match.group(1).strip()
                     current_po['Store ID'] = store_match.group(2)
-                    st.success(f"✅ Found Store: {current_po.get('Store Name', '')} - {current_po.get('Store ID', '')} on line {line_num}")
                 
                 # Extract Dates with exact patterns from working version
                 if order_date_match := re.search(r'Order Date :\s*(\d{2}/\d{2}/\d{4})', line):
                     current_po['Order Date'] = order_date_match.group(1)
-                    st.success(f"✅ Found Order Date: {order_date_match.group(1)} on line {line_num}")
                     
                 if delivery_date_match := re.search(r'Delivery Date \(on or before\) :\s*(\d{2}/\d{2}/\d{4})', line):
                     current_po['Delivery Date'] = delivery_date_match.group(1)
-                    st.success(f"✅ Found Delivery Date: {delivery_date_match.group(1)} on line {line_num}")
                 
                 # Parse item lines with improved validation
                 # Look for lines that start with exactly 6 digits (Item#)
@@ -348,25 +330,28 @@ class PDFExtractor:
                             })
                             
                             items_found += 1
-                            st.success(f"✅ Processed item {items_found}: Item# {parts[0]}, Qty {ordered_qty}, Price {price}")
                             
                         except (ValueError, IndexError) as e:
                             errors.append(f"Error parsing numeric values on line {line_num}: {e}")
                     else:
-                        # Add debugging info only when there are issues
-                        st.warning(f"⚠️ Line parsing issue on line {line_num}: '{line.strip()}'")
-                        st.info(f"📊 Found {len(numeric_values)} numeric values: {numeric_values}")
-                        st.info(f"📋 Line parts: {parts}")
+                        # Only show debugging for problematic lines if no items found yet
+                        if items_found == 0:
+                            st.warning(f"⚠️ Line parsing issue on line {line_num}: '{line.strip()}'")
+                            st.info(f"📊 Found {len(numeric_values)} numeric values: {numeric_values}")
+                            st.info(f"📋 Line parts: {parts}")
                         errors.append(f"Insufficient numeric values on line {line_num}: found {len(numeric_values)}, expected at least 3")
                             
             except Exception as e:
                 errors.append(f"Error processing line {line_num}: {e}")
                 continue
         
+        # Only show warnings if no data was found
         if not po_found:
             st.warning("⚠️ No PO Number found in the PDF")
         if items_found == 0:
             st.warning("⚠️ No item lines found in the PDF")
+        elif items_found > 0:
+            st.success(f"✅ Successfully processed {items_found} items from PO {current_po.get('PO No.', 'Unknown')}")
             
         return data, errors
 
