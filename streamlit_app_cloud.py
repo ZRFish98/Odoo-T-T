@@ -350,8 +350,6 @@ class PDFExtractor:
             st.warning("⚠️ No PO Number found in the PDF")
         if items_found == 0:
             st.warning("⚠️ No item lines found in the PDF")
-        elif items_found > 0:
-            st.success(f"✅ Successfully processed {items_found} items from PO {current_po.get('PO No.', 'Unknown')}")
             
         return data, errors
 
@@ -674,8 +672,11 @@ def main():
                     else:
                         df = read_csv_file(product_variants_file)
                     
+                    if df.empty:
+                        st.error("❌ Product Variants file is empty")
+                        return
+                    
                     st.session_state.product_variants = df
-                    st.success(f"✅ Product Variants loaded: {len(df)} products")
                     st.dataframe(df.head(), use_container_width=True)
                 except Exception as e:
                     st.error(f"❌ Error loading Product Variants: {e}")
@@ -709,7 +710,6 @@ def main():
                         df = read_csv_file(store_names_file)
                     
                     st.session_state.store_names = df
-                    st.success(f"✅ Store Names loaded: {len(df)} stores")
                     st.dataframe(df.head(), use_container_width=True)
                 except Exception as e:
                     st.error(f"❌ Error loading Store Names: {e}")
@@ -754,8 +754,6 @@ def main():
                 )
             
             if uploaded_files:
-                st.success(f"📁 {len(uploaded_files)} file(s) uploaded")
-                
                 # Process files
                 if st.button("Process Files", type="primary"):
                     with st.spinner("Processing files..."):
@@ -800,8 +798,6 @@ def main():
                             st.session_state.purchase_orders = combined_df
                             st.session_state.extraction_errors = all_errors
                             
-                            st.success(f"✅ Successfully loaded {len(combined_df)} order lines from {len(uploaded_files)} file(s)")
-                            
                             # Show preview
                             with st.expander("📊 Preview of Loaded Data", expanded=True):
                                 st.dataframe(combined_df.head(20), use_container_width=True)
@@ -833,8 +829,6 @@ def main():
             )
             
             if uploaded_files:
-                st.success(f"📁 {len(uploaded_files)} PDF file(s) uploaded")
-                
                 # Show file details
                 file_details = []
                 for i, file in enumerate(uploaded_files, 1):
@@ -885,8 +879,6 @@ def main():
                             
                             st.session_state.purchase_orders = df
                             st.session_state.extraction_errors = all_errors
-                            
-                            st.success(f"✅ Successfully extracted {len(df)} order lines from {len(uploaded_files)} file(s)")
                             
                             # Show preview
                             with st.expander("📊 Preview of Extracted Data", expanded=True):
@@ -967,8 +959,6 @@ def main():
                                 if len(errors) > 10:
                                     st.info(f"... and {len(errors) - 10} more warnings")
                         
-                        st.success("✅ Conversion completed successfully!")
-                        
                         # Navigation
                         col1, col2, col3 = st.columns([1, 1, 1])
                         with col2:
@@ -991,8 +981,6 @@ def main():
         st.markdown('<h2 class="step-header">Step 4: Download Results</h2>', unsafe_allow_html=True)
         
         if st.session_state.order_summaries is not None and st.session_state.order_line_details is not None:
-            st.success("🎉 Processing completed! Download your Odoo-ready file below.")
-            
             # Create Excel file
             with st.spinner("Preparing download file..."):
                 excel_buffer = BytesIO()
