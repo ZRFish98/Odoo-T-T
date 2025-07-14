@@ -33,10 +33,10 @@ def install_package(package):
 
 # Try to install and import Excel libraries
 if not install_package("openpyxl"):
-    st.error("Failed to install openpyxl. Please check your requirements file.")
+    st.error("Failed to install openpyxl. Please check your requirements.txt file.")
 
 if not install_package("xlrd"):
-    st.error("Failed to install xlrd. Please check your requirements file.")
+    st.error("Failed to install xlrd. Please check your requirements.txt file.")
 
 # Try to import pdfplumber, fallback to alternative if not available
 try:
@@ -174,6 +174,40 @@ def read_csv_file(file) -> pd.DataFrame:
         raise Exception("Failed to read CSV file with any encoding")
     except Exception as e:
         raise Exception(f"Failed to read CSV file: {e}")
+
+def validate_and_reorder_columns(df: pd.DataFrame, expected_columns: List[str]) -> pd.DataFrame:
+    """Validate and reorder columns, handling missing columns gracefully"""
+    existing_columns = df.columns.tolist()
+    missing_columns = [col for col in expected_columns if col not in existing_columns]
+    
+    if missing_columns:
+        st.warning(f"⚠️ Some expected columns are missing: {missing_columns}")
+        st.info("📋 Available columns: " + ", ".join(existing_columns))
+        
+        # Handle common column mapping for PDF extraction
+        if 'Internal Reference' not in existing_columns and 'Item#' in existing_columns:
+            df['Internal Reference'] = df['Item#']
+            st.info("✅ Mapped 'Item#' to 'Internal Reference'")
+        
+        if '# of Order' not in existing_columns and 'Ordered Qty' in existing_columns:
+            df['# of Order'] = df['Ordered Qty']
+            st.info("✅ Mapped 'Ordered Qty' to '# of Order'")
+        
+        # Re-check for missing columns after mapping
+        existing_columns = df.columns.tolist()
+        missing_columns = [col for col in expected_columns if col not in existing_columns]
+        
+        if missing_columns:
+            st.error(f"❌ Still missing required columns: {missing_columns}")
+            st.error("Please ensure your data contains all required columns or use the correct file format.")
+            return df
+    
+    # Reorder columns, but only use existing ones
+    available_columns = [col for col in expected_columns if col in df.columns]
+    if available_columns:
+        df = df[available_columns]
+    
+    return df
 
 class PDFExtractor:
     """PDF extraction functionality with fallback methods"""
@@ -415,7 +449,7 @@ class OdooConverter:
                         actual_units = int(units_per_product)
                     
                     # Calculate unit price
-                    unit_price = row['Price'] / total_units
+                    unit_price = row['Price'] / product['Units Per Order']
                     
                     expanded_orders.append({
                         'Store ID': row['Store ID'],
@@ -440,7 +474,7 @@ class OdooConverter:
                 if len(product) > 0:
                     product = product.iloc[0]
                     total_units = row['# of Order'] * product['Units Per Order']
-                    unit_price = row['Price'] / total_units
+                    unit_price = row['Price'] / product['Units Per Order']
                     
                     expanded_orders.append({
                         'Store ID': row['Store ID'],
@@ -751,9 +785,10 @@ def main():
                             # Sort by Store ID and PO No.
                             combined_df = combined_df.sort_values(by=['Store ID', 'PO No.'], ascending=[True, True])
                             
-                            # Reorder columns
-                            combined_df = combined_df[['Store ID', 'Store Name', 'PO No.', 'Order Date', 'Delivery Date',
-                                    'Internal Reference', '# of Order', 'Price']]
+                            # Validate and reorder columns
+                            expected_columns = ['Store ID', 'Store Name', 'PO No.', 'Order Date', 'Delivery Date',
+                                              'Internal Reference', '# of Order', 'Price']
+                            combined_df = validate_and_reorder_columns(combined_df, expected_columns)
                             
                             st.session_state.purchase_orders = combined_df
                             st.session_state.extraction_errors = all_errors
@@ -836,9 +871,10 @@ def main():
                             # Sort by Store ID and PO No.
                             df = df.sort_values(by=['Store ID', 'PO No.'], ascending=[True, True])
                             
-                            # Reorder columns
-                            df = df[['Store ID', 'Store Name', 'PO No.', 'Order Date', 'Delivery Date',
-                                    'Internal Reference', '# of Order', 'Price']]
+                            # Validate and reorder columns
+                            expected_columns = ['Store ID', 'Store Name', 'PO No.', 'Order Date', 'Delivery Date',
+                                              'Internal Reference', '# of Order', 'Price']
+                            df = validate_and_reorder_columns(df, expected_columns)
                             
                             st.session_state.purchase_orders = df
                             st.session_state.extraction_errors = all_errors
