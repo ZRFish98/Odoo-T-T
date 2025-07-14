@@ -249,102 +249,191 @@ class OdooConverter:
         """Handle internal references that link to multiple products"""
         errors = []
         
+        # Debug: Show input data
+        st.write("🔍 Debug: Starting handle_multi_product_references")
+        st.write(f"Purchase orders shape: {self.purchase_orders.shape}")
+        st.write(f"Product variants shape: {self.product_variants.shape}")
+        st.write(f"Purchase orders columns: {list(self.purchase_orders.columns)}")
+        st.write(f"Product variants columns: {list(self.product_variants.columns)}")
+        
+        # Check if required columns exist
+        required_po_columns = ['Internal Reference', '# of Order', 'Price']
+        required_pv_columns = ['Internal Reference', 'Barcode', 'Name', 'Units Per Order']
+        
+        missing_po_cols = [col for col in required_po_columns if col not in self.purchase_orders.columns]
+        missing_pv_cols = [col for col in required_pv_columns if col not in self.product_variants.columns]
+        
+        if missing_po_cols:
+            errors.append(f"Missing columns in purchase orders: {missing_po_cols}")
+            st.error(f"❌ Missing columns in purchase orders: {missing_po_cols}")
+        
+        if missing_pv_cols:
+            errors.append(f"Missing columns in product variants: {missing_pv_cols}")
+            st.error(f"❌ Missing columns in product variants: {missing_pv_cols}")
+        
+        if missing_po_cols or missing_pv_cols:
+            self.expanded_orders = pd.DataFrame()
+            return errors
+        
         # Find internal references with multiple products
         ref_counts = self.product_variants['Internal Reference'].value_counts()
         multi_product_refs = ref_counts[ref_counts > 1].index.tolist()
         
+        st.write(f"🔍 Debug: Found {len(multi_product_refs)} multi-product references")
+        st.write(f"🔍 Debug: Multi-product refs: {multi_product_refs[:10]}...")  # Show first 10
+        
+        # Get unique internal references in purchase orders
+        po_internal_refs = self.purchase_orders['Internal Reference'].unique()
+        pv_internal_refs = self.product_variants['Internal Reference'].unique()
+        
+        st.write(f"🔍 Debug: Purchase orders has {len(po_internal_refs)} unique internal references")
+        st.write(f"🔍 Debug: Product variants has {len(pv_internal_refs)} unique internal references")
+        
+        # Check for matching references
+        matching_refs = set(po_internal_refs) & set(pv_internal_refs)
+        st.write(f"🔍 Debug: Found {len(matching_refs)} matching internal references")
+        
+        if len(matching_refs) == 0:
+            st.error("❌ No matching internal references found between purchase orders and product variants")
+            st.write("Sample PO internal refs:", list(po_internal_refs)[:5])
+            st.write("Sample PV internal refs:", list(pv_internal_refs)[:5])
+            errors.append("No matching internal references found")
+            self.expanded_orders = pd.DataFrame()
+            return errors
+        
         # Create expanded purchase orders for multi-product references
         expanded_orders = []
+        processed_count = 0
         
-        for _, row in self.purchase_orders.iterrows():
+        for idx, row in self.purchase_orders.iterrows():
+            processed_count += 1
             internal_ref = row['Internal Reference']
+            
+            # Debug every 10th row
+            if processed_count % 10 == 0:
+                st.write(f"🔍 Debug: Processing row {processed_count}, internal ref: {internal_ref}")
             
             if internal_ref in multi_product_refs:
                 # Get all products for this internal reference
                 products = self.product_variants[self.product_variants['Internal Reference'] == internal_ref]
                 
-                # Calculate units per product (distribute equally)
-                total_units = row['# of Order'] * products.iloc[0]['Units Per Order']
-                units_per_product = total_units / len(products)
+                if len(products) == 0:
+                    errors.append(f"No products found for multi-product reference: {internal_ref}")
+                    continue
                 
-                # Create a line for each product
-                for i, (_, product) in enumerate(products.iterrows()):
-                    # Distribute units as evenly as possible
-                    if i == 0:
-                        # First product gets the remainder
-                        actual_units = int(units_per_product) + (total_units % len(products))
-                    else:
-                        actual_units = int(units_per_product)
+                # Calculate units per product (distribute equally)
+                try:
+                    total_units = row['# of Order'] * products.iloc[0]['Units Per Order']
+                    units_per_product = total_units / len(products)
                     
-                    # Calculate unit price based on individual order data
-                    unit_price = row['Price'] / row['# of Order']
+                    # Create a line for each product
+                    for i, (_, product) in enumerate(products.iterrows()):
+                        # Distribute units as evenly as possible
+                        if i == 0:
+                            # First product gets the remainder
+                            actual_units = int(units_per_product) + (total_units % len(products))
+                        else:
+                            actual_units = int(units_per_product)
+                        
+                        # Calculate unit price based on individual order data
+                        unit_price = row['Price'] / row['# of Order']
+                        
+                        expanded_orders.append({
+                            'Store ID': row['Store ID'],
+                            'Store Name': row['Store Name'],
+                            'Store Official Name': row['Store Official Name'],
+                            'PO No.': row['PO No.'],
+                            'Order Date': row['Order Date'],
+                            'Delivery Date': row['Delivery Date'],
+                            'Internal Reference': internal_ref,
+                            'Barcode': product['Barcode'],
+                            'Product Name': product['Name'],
+                            'Units Per Order': product['Units Per Order'],
+                            'Original Order Quantity': row['# of Order'],
+                            'Total Units': actual_units,
+                            'Unit Price': unit_price,
+                            'Total Price': actual_units * unit_price,
+                            'Is Multi Product': True
+                        })
+                
+                except Exception as e:
+                    errors.append(f"Error processing multi-product reference {internal_ref}: {e}")
                     
-                    expanded_orders.append({
-                        'Store ID': row['Store ID'],
-                        'Store Name': row['Store Name'],
-                        'Store Official Name': row['Store Official Name'],
-                        'PO No.': row['PO No.'],
-                        'Order Date': row['Order Date'],
-                        'Delivery Date': row['Delivery Date'],
-                        'Internal Reference': internal_ref,
-                        'Barcode': product['Barcode'],
-                        'Product Name': product['Name'],
-                        'Units Per Order': product['Units Per Order'],
-                        'Original Order Quantity': row['# of Order'],
-                        'Total Units': actual_units,
-                        'Unit Price': unit_price,
-                        'Total Price': actual_units * unit_price,
-                        'Is Multi Product': True
-                    })
             else:
                 # Single product reference - keep as is
                 product = self.product_variants[self.product_variants['Internal Reference'] == internal_ref]
                 if len(product) > 0:
                     product = product.iloc[0]
-                    total_units = row['# of Order'] * product['Units Per Order']
-                    # Calculate unit price based on individual order data
-                    unit_price = row['Price'] / row['# of Order']
-                    
-                    expanded_orders.append({
-                        'Store ID': row['Store ID'],
-                        'Store Name': row['Store Name'],
-                        'Store Official Name': row['Store Official Name'],
-                        'PO No.': row['PO No.'],
-                        'Order Date': row['Order Date'],
-                        'Delivery Date': row['Delivery Date'],
-                        'Internal Reference': internal_ref,
-                        'Barcode': product['Barcode'],
-                        'Product Name': product['Name'],
-                        'Units Per Order': product['Units Per Order'],
-                        'Original Order Quantity': row['# of Order'],
-                        'Total Units': total_units,
-                        'Unit Price': unit_price,
-                        'Total Price': row['Price'],
-                        'Is Multi Product': False
-                    })
+                    try:
+                        total_units = row['# of Order'] * product['Units Per Order']
+                        # Calculate unit price based on individual order data
+                        unit_price = row['Price'] / row['# of Order']
+                        
+                        expanded_orders.append({
+                            'Store ID': row['Store ID'],
+                            'Store Name': row['Store Name'],
+                            'Store Official Name': row['Store Official Name'],
+                            'PO No.': row['PO No.'],
+                            'Order Date': row['Order Date'],
+                            'Delivery Date': row['Delivery Date'],
+                            'Internal Reference': internal_ref,
+                            'Barcode': product['Barcode'],
+                            'Product Name': product['Name'],
+                            'Units Per Order': product['Units Per Order'],
+                            'Original Order Quantity': row['# of Order'],
+                            'Total Units': total_units,
+                            'Unit Price': unit_price,
+                            'Total Price': row['Price'],
+                            'Is Multi Product': False
+                        })
+                    except Exception as e:
+                        errors.append(f"Error processing single product reference {internal_ref}: {e}")
                 else:
                     errors.append(f"No product found for internal reference: {internal_ref}")
         
+        st.write(f"🔍 Debug: Created {len(expanded_orders)} expanded orders")
+        
         if not expanded_orders:
             errors.append("No expanded orders were created - check product variants matching")
+            st.error("❌ No expanded orders were created - check product variants matching")
             self.expanded_orders = pd.DataFrame()
         else:
             self.expanded_orders = pd.DataFrame(expanded_orders)
+            st.write(f"🔍 Debug: Expanded orders DataFrame shape: {self.expanded_orders.shape}")
+            st.write(f"🔍 Debug: Expanded orders columns: {list(self.expanded_orders.columns)}")
             
         return errors
     
     def create_order_line_details(self):
         """Create detailed order line items for Odoo import"""
+        st.write("🔍 Debug: Starting create_order_line_details")
+        
+        if self.expanded_orders is None or self.expanded_orders.empty:
+            st.error("❌ No expanded orders available for creating order line details")
+            self.order_line_details = pd.DataFrame()
+            return
+        
+        st.write(f"🔍 Debug: Expanded orders shape: {self.expanded_orders.shape}")
+        
+        if self.order_summaries is None or self.order_summaries.empty:
+            st.error("❌ No order summaries available for creating order line details")
+            self.order_line_details = pd.DataFrame()
+            return
+        
+        st.write(f"🔍 Debug: Order summaries shape: {self.order_summaries.shape}")
+        
         # Create order reference mapping
         order_ref_mapping = {}
         for _, summary in self.order_summaries.iterrows():
             store_id = summary['Store ID']
             order_ref_mapping[store_id] = summary['Order Reference']
         
+        st.write(f"🔍 Debug: Created order reference mapping for {len(order_ref_mapping)} stores")
+        
         # Create order line details
         line_details = []
         
-        for _, row in self.expanded_orders.iterrows():
+        for idx, row in self.expanded_orders.iterrows():
             store_id = row['Store ID']
             order_ref = order_ref_mapping.get(store_id, f"OATS{store_id:06d}")
             
@@ -374,7 +463,15 @@ class OdooConverter:
                 'Delivery Date': row['Delivery Date']
             })
         
-        self.order_line_details = pd.DataFrame(line_details)
+        st.write(f"🔍 Debug: Created {len(line_details)} order line details")
+        
+        if line_details:
+            self.order_line_details = pd.DataFrame(line_details)
+            st.write(f"🔍 Debug: Order line details DataFrame shape: {self.order_line_details.shape}")
+            st.write(f"🔍 Debug: Order line details columns: {list(self.order_line_details.columns)}")
+        else:
+            st.error("❌ No order line details were created")
+            self.order_line_details = pd.DataFrame()
     
     def process_all(self) -> Tuple[pd.DataFrame, pd.DataFrame, List[str]]:
         """Run the complete conversion process"""
