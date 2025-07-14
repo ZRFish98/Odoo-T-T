@@ -276,8 +276,8 @@ class OdooConverter:
                     else:
                         actual_units = int(units_per_product)
                     
-                    # Calculate unit price
-                    unit_price = row['Price'] / product['Units Per Order']
+                    # Calculate unit price based on individual order data
+                    unit_price = row['Price'] / row['# of Order']
                     
                     expanded_orders.append({
                         'Store ID': row['Store ID'],
@@ -302,7 +302,8 @@ class OdooConverter:
                 if len(product) > 0:
                     product = product.iloc[0]
                     total_units = row['# of Order'] * product['Units Per Order']
-                    unit_price = row['Price'] / product['Units Per Order']
+                    # Calculate unit price based on individual order data
+                    unit_price = row['Price'] / row['# of Order']
                     
                     expanded_orders.append({
                         'Store ID': row['Store ID'],
@@ -324,7 +325,12 @@ class OdooConverter:
                 else:
                     errors.append(f"No product found for internal reference: {internal_ref}")
         
-        self.expanded_orders = pd.DataFrame(expanded_orders)
+        if not expanded_orders:
+            errors.append("No expanded orders were created - check product variants matching")
+            self.expanded_orders = pd.DataFrame()
+        else:
+            self.expanded_orders = pd.DataFrame(expanded_orders)
+            
         return errors
     
     def create_order_line_details(self):
@@ -554,23 +560,47 @@ def main():
                     # Display results
                     st.success("✅ Conversion completed successfully!")
                     
+                    # Debug info
+                    if order_line_details is not None and not order_line_details.empty:
+                        st.write(f"📊 Debug: Order line details shape: {order_line_details.shape}")
+                        st.write(f"📊 Debug: Order line details columns: {list(order_line_details.columns)}")
+                        
+                        # Check if Total Price column exists
+                        if 'Total Price' in order_line_details.columns:
+                            total_value = order_line_details['Total Price'].sum()
+                            avg_value = order_line_details['Total Price'].mean()
+                        else:
+                            st.error("❌ Total Price column not found in order line details")
+                            total_value = 0
+                            avg_value = 0
+                    else:
+                        st.error("❌ No order line details were generated")
+                        total_value = 0
+                        avg_value = 0
+                    
                     col1, col2, col3, col4 = st.columns(4)
                     with col1:
-                        st.metric("Total Stores", len(order_summaries))
+                        st.metric("Total Stores", len(order_summaries) if order_summaries is not None else 0)
                     with col2:
-                        st.metric("Total Order Lines", len(order_line_details))
+                        st.metric("Total Order Lines", len(order_line_details) if order_line_details is not None else 0)
                     with col3:
-                        st.metric("Total Value", f"${order_line_details['Total Price'].sum():,.2f}")
+                        st.metric("Total Value", f"${total_value:,.2f}")
                     with col4:
-                        st.metric("Average Order Value", f"${order_line_details['Total Price'].mean():,.2f}")
+                        st.metric("Average Order Value", f"${avg_value:,.2f}")
                     
                     # Show order summaries
-                    with st.expander("📋 Order Summaries", expanded=True):
-                        st.dataframe(order_summaries, use_container_width=True)
+                    if order_summaries is not None and not order_summaries.empty:
+                        with st.expander("📋 Order Summaries", expanded=True):
+                            st.dataframe(order_summaries, use_container_width=True)
+                    else:
+                        st.error("❌ No order summaries were generated")
                     
                     # Show order line details
-                    with st.expander("📊 Order Line Details (First 20 rows)", expanded=False):
-                        st.dataframe(order_line_details.head(20), use_container_width=True)
+                    if order_line_details is not None and not order_line_details.empty:
+                        with st.expander("📊 Order Line Details (First 20 rows)", expanded=False):
+                            st.dataframe(order_line_details.head(20), use_container_width=True)
+                    else:
+                        st.error("❌ No order line details were generated")
                     
                     # Show errors if any
                     if errors:
@@ -580,50 +610,70 @@ def main():
                             if len(errors) > 10:
                                 st.info(f"... and {len(errors) - 10} more warnings")
                     
-                    # Create Excel file for download
-                    with st.spinner("Preparing download file..."):
-                        excel_buffer = BytesIO()
-                        
-                        with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                            # Save order summaries
-                            order_summaries.to_excel(writer, sheet_name='Order Summaries', index=False)
+                    # Create Excel file for download only if we have data
+                    if order_summaries is not None and order_line_details is not None and not order_line_details.empty:
+                        with st.spinner("Preparing download file..."):
+                            excel_buffer = BytesIO()
                             
-                            # Save order line details
-                            order_line_details.to_excel(writer, sheet_name='Order Line Details', index=False)
+                            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                                # Save order summaries
+                                order_summaries.to_excel(writer, sheet_name='Order Summaries', index=False)
+                                
+                                # Save order line details
+                                order_line_details.to_excel(writer, sheet_name='Order Line Details', index=False)
+                                
+                                # Save original data for reference
+                                purchase_orders.to_excel(writer, sheet_name='Original Purchase Orders', index=False)
+                                product_variants.to_excel(writer, sheet_name='Product Variants', index=False)
+                                store_names.to_excel(writer, sheet_name='Store Names', index=False)
                             
-                            # Save original data for reference
-                            purchase_orders.to_excel(writer, sheet_name='Original Purchase Orders', index=False)
-                            product_variants.to_excel(writer, sheet_name='Product Variants', index=False)
-                            store_names.to_excel(writer, sheet_name='Store Names', index=False)
+                            excel_buffer.seek(0)
                         
-                        excel_buffer.seek(0)
-                    
-                    # Download section
-                    st.markdown("---")
-                    st.markdown('<h2 class="section-header">📥 Download Results</h2>', unsafe_allow_html=True)
-                    
-                    # Download button
-                    st.download_button(
-                        label="📥 Download Odoo_Import_Ready.xlsx",
-                        data=excel_buffer.getvalue(),
-                        file_name="Odoo_Import_Ready.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        type="primary",
-                        use_container_width=True
-                    )
-                    
-                    st.info("📋 The downloaded file contains:")
-                    st.markdown("""
-                    - **Order Summaries**: Summary of orders by store
-                    - **Order Line Details**: Detailed product lines for Odoo import
-                    - **Original Purchase Orders**: Raw extracted data
-                    - **Product Variants**: Reference product data
-                    - **Store Names**: Reference store data
-                    """)
+                        # Download section
+                        st.markdown("---")
+                        st.markdown('<h2 class="section-header">📥 Download Results</h2>', unsafe_allow_html=True)
+                        
+                        # Download button
+                        st.download_button(
+                            label="📥 Download Odoo_Import_Ready.xlsx",
+                            data=excel_buffer.getvalue(),
+                            file_name="Odoo_Import_Ready.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            type="primary",
+                            use_container_width=True
+                        )
+                        
+                        st.info("📋 The downloaded file contains:")
+                        st.markdown("""
+                        - **Order Summaries**: Summary of orders by store
+                        - **Order Line Details**: Detailed product lines for Odoo import
+                        - **Original Purchase Orders**: Raw extracted data
+                        - **Product Variants**: Reference product data
+                        - **Store Names**: Reference store data
+                        """)
+                    else:
+                        st.error("❌ Cannot generate download file - no valid data was created")
                 
                 except Exception as e:
                     st.error(f"❌ Error during conversion: {e}")
                     st.error("Please check your file formats and try again.")
+                    
+                    # Additional debugging info
+                    st.write("📊 Debug Info:")
+                    st.write(f"Purchase Orders shape: {purchase_orders.shape}")
+                    st.write(f"Product Variants shape: {product_variants.shape}")
+                    st.write(f"Store Names shape: {store_names.shape}")
+                    st.write(f"Purchase Orders columns: {list(purchase_orders.columns)}")
+                    st.write(f"Product Variants columns: {list(product_variants.columns)}")
+                    st.write(f"Store Names columns: {list(store_names.columns)}")
+                    
+                    # Show first few rows of each dataset
+                    st.write("Purchase Orders sample:")
+                    st.dataframe(purchase_orders.head(3))
+                    st.write("Product Variants sample:")
+                    st.dataframe(product_variants.head(3))
+                    st.write("Store Names sample:")
+                    st.dataframe(store_names.head(3))
     
     else:
         st.info("📋 Please upload all three files to proceed with conversion")
