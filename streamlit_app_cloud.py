@@ -307,7 +307,8 @@ class PDFExtractor:
                         break
                 
                 # Parse item lines with improved validation
-                if 'PO No.' in current_po and re.match(r'^\d{6}\b', line.strip()):
+                # Look for lines that start with a number (Item#) followed by more numbers
+                if 'PO No.' in current_po and re.match(r'^\d+\s+\d+', line.strip()):
                     parts = line.strip().split()
                     if len(parts) < 4:
                         continue
@@ -315,8 +316,8 @@ class PDFExtractor:
                     # Find all numeric values in the line
                     numeric_values = []
                     for part in parts:
-                        # Match both integer and decimal numbers
-                        if re.match(r'^\d+(\.\d{2})?$', part):
+                        # Match both integer and decimal numbers - more flexible pattern
+                        if re.match(r'^\d+(\.\d+)?$', part):
                             numeric_values.append(float(part))
                     
                     if len(numeric_values) >= 3:
@@ -358,6 +359,10 @@ class PDFExtractor:
                         except (ValueError, IndexError) as e:
                             errors.append(f"Error parsing numeric values on line {line_num}: {e}")
                     else:
+                        # Add debugging info only when there are issues
+                        st.warning(f"⚠️ Line parsing issue on line {line_num}: '{line.strip()}'")
+                        st.info(f"📊 Found {len(numeric_values)} numeric values: {numeric_values}")
+                        st.info(f"📋 Line parts: {parts}")
                         errors.append(f"Insufficient numeric values on line {line_num}: found {len(numeric_values)}, expected at least 3")
                             
             except Exception as e:
