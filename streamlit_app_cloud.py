@@ -883,23 +883,26 @@ def main():
                             # Show preview
                             with st.expander("📊 Preview of Extracted Data", expanded=True):
                                 st.dataframe(df.head(20), use_container_width=True)
-                            
-                            # Show errors if any
-                            if all_errors:
-                                with st.expander("⚠️ Processing Warnings", expanded=False):
-                                    for error in all_errors[:10]:
-                                        st.warning(error)
-                                    if len(all_errors) > 10:
-                                        st.info(f"... and {len(all_errors) - 10} more warnings")
-                            
-                            # Navigation
-                            col1, col2, col3 = st.columns([1, 1, 1])
-                            with col2:
-                                if st.button("Next Step →", type="primary"):
-                                    st.session_state.step = 3
-                                    st.rerun()
                         else:
                             st.error("❌ No valid purchase order data found in the uploaded files.")
+                            # Set empty dataframe so user can still proceed if needed
+                            st.session_state.purchase_orders = pd.DataFrame()
+                            st.session_state.extraction_errors = all_errors
+                        
+                        # Show errors if any
+                        if all_errors:
+                            with st.expander("⚠️ Processing Warnings", expanded=False):
+                                for error in all_errors[:10]:
+                                    st.warning(error)
+                                if len(all_errors) > 10:
+                                    st.info(f"... and {len(all_errors) - 10} more warnings")
+                        
+                        # Navigation - always show after processing
+                        col1, col2, col3 = st.columns([1, 1, 1])
+                        with col2:
+                            if st.button("Next Step →", type="primary"):
+                                st.session_state.step = 3
+                                st.rerun()
         
         # Back button
         col1, col2, col3 = st.columns([1, 1, 1])
@@ -912,7 +915,7 @@ def main():
     elif st.session_state.step == 3:
         st.markdown('<h2 class="step-header">Step 3: Process & Convert to Odoo Format</h2>', unsafe_allow_html=True)
         
-        if st.session_state.purchase_orders is not None:
+        if st.session_state.purchase_orders is not None and not st.session_state.purchase_orders.empty:
             st.info("🔄 Converting data to Odoo-compatible format...")
             
             if st.button("Start Conversion", type="primary"):
@@ -968,6 +971,19 @@ def main():
                     
                     except Exception as e:
                         st.error(f"❌ Error during conversion: {e}")
+        else:
+            st.warning("⚠️ No purchase order data available for conversion.")
+            st.info("Please go back to Step 2 and ensure PDF files are processed successfully.")
+            
+            # Show option to skip conversion if needed
+            st.markdown("---")
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                st.info("You can still proceed to download any reference data files.")
+            with col2:
+                if st.button("Skip Conversion →", type="secondary"):
+                    st.session_state.step = 4
+                    st.rerun()
         
         # Back button
         col1, col2, col3 = st.columns([1, 1, 1])
