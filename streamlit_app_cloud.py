@@ -13,6 +13,7 @@ from typing import Dict, List, Tuple, Optional
 from io import BytesIO, StringIO
 import subprocess
 import sys
+import re
 
 # Force install required packages if not available
 def install_package(package):
@@ -185,6 +186,32 @@ class OdooConverter:
         self.store_names = store_names
         self.order_summaries = None
         self.order_line_details = None
+        self.expanded_orders = None
+        
+        # Data preparation
+        self._prepare_data()
+        
+    def _prepare_data(self):
+        """Prepare data for processing"""
+        # Clean column names and handle specific column name issues
+        self.purchase_orders.columns = self.purchase_orders.columns.str.strip()
+        self.product_variants.columns = self.product_variants.columns.str.strip()
+        
+        # Convert Internal Reference to string for consistent matching
+        self.purchase_orders['Internal Reference'] = self.purchase_orders['Internal Reference'].astype(str)
+        self.product_variants['Internal Reference'] = self.product_variants['Internal Reference'].astype(str)
+        
+        st.write("🔍 Debug: Data preparation completed")
+        st.write(f"Purchase Orders columns: {list(self.purchase_orders.columns)}")
+        st.write(f"Product Variants columns: {list(self.product_variants.columns)}")
+        
+    def extract_store_id_from_official_name(self, official_name: str) -> str:
+        """Extract store ID from official store name"""
+        # Pattern: "T&T Supermarket Inc., Store Name - XXX"
+        match = re.search(r'- (\d+)$', official_name)
+        if match:
+            return match.group(1)
+        return None
         
     def match_store_names(self) -> List[str]:
         """Match store names with official names using direct Store ID mapping"""
@@ -203,7 +230,15 @@ class OdooConverter:
         # Log unmatched stores
         unmatched_stores = self.purchase_orders[self.purchase_orders['Store Official Name'].isna()]['Store ID'].unique()
         if len(unmatched_stores) > 0:
-            errors.append(f"Unmatched store IDs: {unmatched_stores}")
+            error_msg = f"Unmatched store IDs: {unmatched_stores}"
+            errors.append(error_msg)
+            st.warning(f"⚠️ {error_msg}")
+        else:
+            st.success("✅ All store IDs successfully matched with official names")
+        
+        # Log successful matches
+        matched_count = self.purchase_orders['Store Official Name'].notna().sum()
+        st.info(f"📊 Successfully matched {matched_count} out of {len(self.purchase_orders)} order lines")
         
         return errors
     
@@ -244,17 +279,11 @@ class OdooConverter:
             })
         
         self.order_summaries = pd.DataFrame(summaries)
-    
+        st.success(f"✅ Created {len(self.order_summaries)} order summaries")
+        
     def handle_multi_product_references(self) -> List[str]:
         """Handle internal references that link to multiple products"""
         errors = []
-        
-        # Debug: Show input data
-        st.write("🔍 Debug: Starting handle_multi_product_references")
-        st.write(f"Purchase orders shape: {self.purchase_orders.shape}")
-        st.write(f"Product variants shape: {self.product_variants.shape}")
-        st.write(f"Purchase orders columns: {list(self.purchase_orders.columns)}")
-        st.write(f"Product variants columns: {list(self.product_variants.columns)}")
         
         # Check if required columns exist
         required_po_columns = ['Internal Reference', '# of Order', 'Price']
@@ -264,12 +293,14 @@ class OdooConverter:
         missing_pv_cols = [col for col in required_pv_columns if col not in self.product_variants.columns]
         
         if missing_po_cols:
-            errors.append(f"Missing columns in purchase orders: {missing_po_cols}")
-            st.error(f"❌ Missing columns in purchase orders: {missing_po_cols}")
+            error_msg = f"Missing columns in purchase orders: {missing_po_cols}"
+            errors.append(error_msg)
+            st.error(f"❌ {error_msg}")
         
         if missing_pv_cols:
-            errors.append(f"Missing columns in product variants: {missing_pv_cols}")
-            st.error(f"❌ Missing columns in product variants: {missing_pv_cols}")
+            error_msg = f"Missing columns in product variants: {missing_pv_cols}"
+            errors.append(error_msg)
+            st.error(f"❌ {error_msg}")
         
         if missing_po_cols or missing_pv_cols:
             self.expanded_orders = pd.DataFrame()
@@ -279,46 +310,42 @@ class OdooConverter:
         ref_counts = self.product_variants['Internal Reference'].value_counts()
         multi_product_refs = ref_counts[ref_counts > 1].index.tolist()
         
-        st.write(f"🔍 Debug: Found {len(multi_product_refs)} multi-product references")
-        st.write(f"🔍 Debug: Multi-product refs: {multi_product_refs[:10]}...")  # Show first 10
-        
-        # Get unique internal references in purchase orders
-        po_internal_refs = self.purchase_orders['Internal Reference'].unique()
-        pv_internal_refs = self.product_variants['Internal Reference'].unique()
-        
-        st.write(f"🔍 Debug: Purchase orders has {len(po_internal_refs)} unique internal references")
-        st.write(f"🔍 Debug: Product variants has {len(pv_internal_refs)} unique internal references")
+        st.info(f"📊 Found {len(multi_product_refs)} internal references with multiple products")
         
         # Check for matching references
-        matching_refs = set(po_internal_refs) & set(pv_internal_refs)
-        st.write(f"🔍 Debug: Found {len(matching_refs)} matching internal references")
+        po_internal_refs = set(self.purchase_orders['Internal Reference'].unique())
+        pv_internal_refs = set(self.product_variants['Internal Reference'].unique())
+        
+        matching_refs = po_internal_refs & pv_internal_refs
+        unmatched_refs = po_internal_refs - pv_internal_refs
+        
+        st.info(f"📊 Found {len(matching_refs)} matching internal references")
+        
+        if unmatched_refs:
+            error_msg = f"Unmatched internal references: {list(unmatched_refs)[:10]}..."
+            errors.append(error_msg)
+            st.warning(f"⚠️ {error_msg}")
         
         if len(matching_refs) == 0:
-            st.error("❌ No matching internal references found between purchase orders and product variants")
-            st.write("Sample PO internal refs:", list(po_internal_refs)[:5])
-            st.write("Sample PV internal refs:", list(pv_internal_refs)[:5])
-            errors.append("No matching internal references found")
+            error_msg = "No matching internal references found between purchase orders and product variants"
+            errors.append(error_msg)
+            st.error(f"❌ {error_msg}")
             self.expanded_orders = pd.DataFrame()
             return errors
         
         # Create expanded purchase orders for multi-product references
         expanded_orders = []
-        processed_count = 0
         
-        for idx, row in self.purchase_orders.iterrows():
-            processed_count += 1
+        for _, row in self.purchase_orders.iterrows():
             internal_ref = row['Internal Reference']
-            
-            # Debug every 10th row
-            if processed_count % 10 == 0:
-                st.write(f"🔍 Debug: Processing row {processed_count}, internal ref: {internal_ref}")
             
             if internal_ref in multi_product_refs:
                 # Get all products for this internal reference
                 products = self.product_variants[self.product_variants['Internal Reference'] == internal_ref]
                 
                 if len(products) == 0:
-                    errors.append(f"No products found for multi-product reference: {internal_ref}")
+                    error_msg = f"No products found for multi-product reference: {internal_ref}"
+                    errors.append(error_msg)
                     continue
                 
                 # Calculate units per product (distribute equally)
@@ -335,8 +362,8 @@ class OdooConverter:
                         else:
                             actual_units = int(units_per_product)
                         
-                        # Calculate unit price based on individual order data
-                        unit_price = row['Price'] / row['# of Order']
+                        # Calculate unit price - IMPROVED CALCULATION
+                        unit_price = row['Price'] / product['Units Per Order']
                         
                         expanded_orders.append({
                             'Store ID': row['Store ID'],
@@ -357,7 +384,8 @@ class OdooConverter:
                         })
                 
                 except Exception as e:
-                    errors.append(f"Error processing multi-product reference {internal_ref}: {e}")
+                    error_msg = f"Error processing multi-product reference {internal_ref}: {e}"
+                    errors.append(error_msg)
                     
             else:
                 # Single product reference - keep as is
@@ -366,8 +394,8 @@ class OdooConverter:
                     product = product.iloc[0]
                     try:
                         total_units = row['# of Order'] * product['Units Per Order']
-                        # Calculate unit price based on individual order data
-                        unit_price = row['Price'] / row['# of Order']
+                        # Calculate unit price - IMPROVED CALCULATION
+                        unit_price = row['Price'] / product['Units Per Order']
                         
                         expanded_orders.append({
                             'Store ID': row['Store ID'],
@@ -387,40 +415,34 @@ class OdooConverter:
                             'Is Multi Product': False
                         })
                     except Exception as e:
-                        errors.append(f"Error processing single product reference {internal_ref}: {e}")
+                        error_msg = f"Error processing single product reference {internal_ref}: {e}"
+                        errors.append(error_msg)
                 else:
-                    errors.append(f"No product found for internal reference: {internal_ref}")
-        
-        st.write(f"🔍 Debug: Created {len(expanded_orders)} expanded orders")
+                    error_msg = f"No product found for internal reference: {internal_ref}"
+                    errors.append(error_msg)
         
         if not expanded_orders:
-            errors.append("No expanded orders were created - check product variants matching")
-            st.error("❌ No expanded orders were created - check product variants matching")
+            error_msg = "No expanded orders were created - check product variants matching"
+            errors.append(error_msg)
+            st.error(f"❌ {error_msg}")
             self.expanded_orders = pd.DataFrame()
         else:
             self.expanded_orders = pd.DataFrame(expanded_orders)
-            st.write(f"🔍 Debug: Expanded orders DataFrame shape: {self.expanded_orders.shape}")
-            st.write(f"🔍 Debug: Expanded orders columns: {list(self.expanded_orders.columns)}")
+            st.success(f"✅ Expanded to {len(self.expanded_orders)} order lines")
             
         return errors
     
     def create_order_line_details(self):
         """Create detailed order line items for Odoo import"""
-        st.write("🔍 Debug: Starting create_order_line_details")
-        
         if self.expanded_orders is None or self.expanded_orders.empty:
             st.error("❌ No expanded orders available for creating order line details")
             self.order_line_details = pd.DataFrame()
             return
         
-        st.write(f"🔍 Debug: Expanded orders shape: {self.expanded_orders.shape}")
-        
         if self.order_summaries is None or self.order_summaries.empty:
             st.error("❌ No order summaries available for creating order line details")
             self.order_line_details = pd.DataFrame()
             return
-        
-        st.write(f"🔍 Debug: Order summaries shape: {self.order_summaries.shape}")
         
         # Create order reference mapping
         order_ref_mapping = {}
@@ -428,12 +450,10 @@ class OdooConverter:
             store_id = summary['Store ID']
             order_ref_mapping[store_id] = summary['Order Reference']
         
-        st.write(f"🔍 Debug: Created order reference mapping for {len(order_ref_mapping)} stores")
-        
         # Create order line details
         line_details = []
         
-        for idx, row in self.expanded_orders.iterrows():
+        for _, row in self.expanded_orders.iterrows():
             store_id = row['Store ID']
             order_ref = order_ref_mapping.get(store_id, f"OATS{store_id:06d}")
             
@@ -463,15 +483,84 @@ class OdooConverter:
                 'Delivery Date': row['Delivery Date']
             })
         
-        st.write(f"🔍 Debug: Created {len(line_details)} order line details")
-        
         if line_details:
             self.order_line_details = pd.DataFrame(line_details)
-            st.write(f"🔍 Debug: Order line details DataFrame shape: {self.order_line_details.shape}")
-            st.write(f"🔍 Debug: Order line details columns: {list(self.order_line_details.columns)}")
+            st.success(f"✅ Created {len(self.order_line_details)} order line details")
         else:
             st.error("❌ No order line details were created")
             self.order_line_details = pd.DataFrame()
+    
+    def validate_data(self) -> List[str]:
+        """Validate the processed data"""
+        errors = []
+        
+        # Check for missing data
+        if self.purchase_orders is not None:
+            missing_official_names = self.purchase_orders['Store Official Name'].isna().sum()
+            if missing_official_names > 0:
+                error_msg = f"Missing official store names: {missing_official_names}"
+                errors.append(error_msg)
+                st.warning(f"⚠️ {error_msg}")
+        
+        # Check for unmatched internal references
+        if self.purchase_orders is not None and self.product_variants is not None:
+            po_refs = set(self.purchase_orders['Internal Reference'].unique())
+            pv_refs = set(self.product_variants['Internal Reference'].unique())
+            unmatched_refs = po_refs - pv_refs
+            if unmatched_refs:
+                error_msg = f"Unmatched internal references: {list(unmatched_refs)[:10]}..."
+                errors.append(error_msg)
+                st.warning(f"⚠️ {error_msg}")
+        
+        # Validate calculations
+        if (self.order_line_details is not None and not self.order_line_details.empty and 
+            self.purchase_orders is not None and 'Total Price' in self.order_line_details.columns):
+            
+            total_price_check = abs(self.order_line_details['Total Price'].sum() - 
+                                   self.purchase_orders['Price'].sum())
+            if total_price_check > 0.01:  # Allow small rounding differences
+                error_msg = f"Price mismatch: ${total_price_check:.2f}"
+                errors.append(error_msg)
+                st.warning(f"⚠️ {error_msg}")
+        
+        if not errors:
+            st.success("✅ Data validation completed successfully")
+        
+        return errors
+    
+    def generate_summary_report(self):
+        """Generate a summary report of the conversion"""
+        if self.order_summaries is None or self.order_line_details is None:
+            st.error("❌ Cannot generate summary report - missing data")
+            return
+        
+        report = {
+            'Total Stores': len(self.order_summaries),
+            'Total PO Numbers': self.purchase_orders['PO No.'].nunique(),
+            'Total Order Lines (Original)': len(self.purchase_orders),
+            'Total Order Lines (Expanded)': len(self.order_line_details),
+            'Multi-Product References': len(self.expanded_orders[self.expanded_orders['Is Multi Product'] == True]['Internal Reference'].unique()) if self.expanded_orders is not None else 0,
+            'Total Value': self.order_line_details['Total Price'].sum(),
+            'Average Order Value': self.order_line_details['Total Price'].mean()
+        }
+        
+        st.markdown("### 📊 Conversion Summary Report")
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Total Stores", report['Total Stores'])
+            st.metric("Total PO Numbers", report['Total PO Numbers'])
+        
+        with col2:
+            st.metric("Original Order Lines", report['Total Order Lines (Original)'])
+            st.metric("Expanded Order Lines", report['Total Order Lines (Expanded)'])
+        
+        with col3:
+            st.metric("Multi-Product References", report['Multi-Product References'])
+            st.metric("Total Value", f"${report['Total Value']:,.2f}")
+        
+        with col4:
+            st.metric("Average Order Value", f"${report['Average Order Value']:,.2f}")
     
     def process_all(self) -> Tuple[pd.DataFrame, pd.DataFrame, List[str]]:
         """Run the complete conversion process"""
@@ -490,6 +579,13 @@ class OdooConverter:
         
         # Create order line details
         self.create_order_line_details()
+        
+        # Validate data
+        validation_errors = self.validate_data()
+        errors.extend(validation_errors)
+        
+        # Generate summary report
+        self.generate_summary_report()
         
         return self.order_summaries, self.order_line_details, errors
 
@@ -656,34 +752,6 @@ def main():
                     
                     # Display results
                     st.success("✅ Conversion completed successfully!")
-                    
-                    # Debug info
-                    if order_line_details is not None and not order_line_details.empty:
-                        st.write(f"📊 Debug: Order line details shape: {order_line_details.shape}")
-                        st.write(f"📊 Debug: Order line details columns: {list(order_line_details.columns)}")
-                        
-                        # Check if Total Price column exists
-                        if 'Total Price' in order_line_details.columns:
-                            total_value = order_line_details['Total Price'].sum()
-                            avg_value = order_line_details['Total Price'].mean()
-                        else:
-                            st.error("❌ Total Price column not found in order line details")
-                            total_value = 0
-                            avg_value = 0
-                    else:
-                        st.error("❌ No order line details were generated")
-                        total_value = 0
-                        avg_value = 0
-                    
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        st.metric("Total Stores", len(order_summaries) if order_summaries is not None else 0)
-                    with col2:
-                        st.metric("Total Order Lines", len(order_line_details) if order_line_details is not None else 0)
-                    with col3:
-                        st.metric("Total Value", f"${total_value:,.2f}")
-                    with col4:
-                        st.metric("Average Order Value", f"${avg_value:,.2f}")
                     
                     # Show order summaries
                     if order_summaries is not None and not order_summaries.empty:
