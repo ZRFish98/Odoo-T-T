@@ -289,85 +289,52 @@ class PDFExtractor:
         for line_num, line in enumerate(lines, 1):
             try:
                 # Extract PO Number with improved pattern
-                if po_match := re.search(r'PO\s*No\.?\s*:?\s*(\d+)', line, re.IGNORECASE):
+                if po_match := re.search(r'PO No\.:\s*(\d+)', line):
                     current_po['PO No.'] = po_match.group(1)
                     po_found = True
                     st.success(f"✅ Found PO No.: {po_match.group(1)} on line {line_num}")
                 
-                # Extract Store Name and Store ID with more flexible pattern
-                store_patterns = [
-                    r'Store\s*:\s*(.*?)\s*-\s*(\d{3})\b',
-                    r'Store\s*:\s*(.*?)\s*\((\d{3})\)',
-                    r'Store\s*ID\s*:\s*(\d{3})\s*-\s*(.*?)\b'
-                ]
+                # Extract Store Name and Store ID with exact pattern from working version
+                if store_match := re.search(r'Store :\s*(.*?)\s*-\s*(\d{3})\b', line):
+                    current_po['Store Name'] = store_match.group(1).strip()
+                    current_po['Store ID'] = store_match.group(2)
+                    st.success(f"✅ Found Store: {current_po.get('Store Name', '')} - {current_po.get('Store ID', '')} on line {line_num}")
                 
-                for pattern in store_patterns:
-                    if store_match := re.search(pattern, line, re.IGNORECASE):
-                        if pattern == r'Store\s*ID\s*:\s*(\d{3})\s*-\s*(.*?)\b':
-                            current_po['Store ID'] = store_match.group(1)
-                            current_po['Store Name'] = store_match.group(2).strip()
-                        else:
-                            current_po['Store Name'] = store_match.group(1).strip()
-                            current_po['Store ID'] = store_match.group(2)
-                        st.success(f"✅ Found Store: {current_po.get('Store Name', '')} - {current_po.get('Store ID', '')} on line {line_num}")
-                        break
-                
-                # Extract Dates with validation
-                date_patterns = [
-                    (r'Order\s*Date\s*:\s*(\d{1,2}/\d{1,2}/\d{4})', 'Order Date'),
-                    (r'Delivery\s*Date\s*\(on\s*or\s*before\)\s*:\s*(\d{1,2}/\d{1,2}/\d{4})', 'Delivery Date'),
-                    (r'Delivery\s*Date\s*:\s*(\d{1,2}/\d{1,2}/\d{4})', 'Delivery Date')
-                ]
-                
-                for pattern, field_name in date_patterns:
-                    if date_match := re.search(pattern, line, re.IGNORECASE):
-                        date_str = date_match.group(1)
-                        if PDFExtractor.validate_date(date_str):
-                            current_po[field_name] = date_str
-                            st.success(f"✅ Found {field_name}: {date_str} on line {line_num}")
-                        else:
-                            errors.append(f"Invalid date format: {date_str} on line {line_num}")
-                        break
+                # Extract Dates with exact patterns from working version
+                if order_date_match := re.search(r'Order Date :\s*(\d{2}/\d{2}/\d{4})', line):
+                    current_po['Order Date'] = order_date_match.group(1)
+                    st.success(f"✅ Found Order Date: {order_date_match.group(1)} on line {line_num}")
+                    
+                if delivery_date_match := re.search(r'Delivery Date \(on or before\) :\s*(\d{2}/\d{2}/\d{4})', line):
+                    current_po['Delivery Date'] = delivery_date_match.group(1)
+                    st.success(f"✅ Found Delivery Date: {delivery_date_match.group(1)} on line {line_num}")
                 
                 # Parse item lines with improved validation
-                # Look for lines that start with a number (Item#) followed by more numbers
-                if 'PO No.' in current_po and re.match(r'^\d+\s+\d+', line.strip()):
+                # Look for lines that start with exactly 6 digits (Item#)
+                if 'PO No.' in current_po and re.match(r'^\d{6}\b', line.strip()):
                     parts = line.strip().split()
-                    if len(parts) < 4:
-                        continue
-                        
-                    # Find all numeric values in the line
-                    numeric_values = []
-                    for part in parts:
-                        # Match both integer and decimal numbers - more flexible pattern
-                        if re.match(r'^\d+(\.\d+)?$', part):
-                            numeric_values.append(float(part))
+                    
+                    # Find numeric values with exactly 2 decimal places (as in working version)
+                    numeric_values = [part for part in parts if re.match(r'^\d+\.\d{2}$', part)]
                     
                     if len(numeric_values) >= 3:
                         try:
-                            # Based on the format: Item# Quantity UnitPrice TotalPrice
-                            # parts[0] = Item#
-                            # numeric_values[0] = Quantity (second value in line)
-                            # numeric_values[1] = Unit Price (third value in line)
-                            # numeric_values[2] = Total Price (fourth value in line)
+                            # Based on working po_extract.py logic:
+                            # numeric_values[-3] = Quantity (third from end)
+                            # numeric_values[-2] = Price (second from end)
+                            # numeric_values[-1] = Total (last)
                             
-                            ordered_qty = numeric_values[0]  # Quantity is the first numeric value
-                            unit_price = numeric_values[1]   # Unit price is the second numeric value
-                            total_price = numeric_values[2]   # Total price is the third numeric value
+                            ordered_qty = float(numeric_values[-3])  # Third from end
+                            price = float(numeric_values[-2])        # Second from end
                             
                             # Validate quantities and prices
                             if not PDFExtractor.validate_numeric(str(ordered_qty), 0, 1000000):
                                 errors.append(f"Invalid quantity: {ordered_qty} on line {line_num}")
                                 continue
                                 
-                            if not PDFExtractor.validate_numeric(str(unit_price), 0, 1000000):
-                                errors.append(f"Invalid unit price: {unit_price} on line {line_num}")
+                            if not PDFExtractor.validate_numeric(str(price), 0, 1000000):
+                                errors.append(f"Invalid price: {price} on line {line_num}")
                                 continue
-                            
-                            # Verify the calculation: total_price should equal ordered_qty * unit_price
-                            expected_total = ordered_qty * unit_price
-                            if abs(expected_total - total_price) > 0.01:  # Allow small rounding differences
-                                errors.append(f"Price calculation mismatch on line {line_num}: {ordered_qty} × {unit_price} = {expected_total}, but total is {total_price}")
                             
                             data.append({
                                 'PO No.': current_po['PO No.'],
@@ -377,11 +344,11 @@ class PDFExtractor:
                                 'Delivery Date': current_po.get('Delivery Date', ''),
                                 'Item#': parts[0],
                                 'Ordered Qty': ordered_qty,
-                                'Price': unit_price  # Store unit price, not total price
+                                'Price': price
                             })
                             
                             items_found += 1
-                            st.success(f"✅ Processed item {items_found}: Item# {parts[0]}, Qty {ordered_qty}, Price {unit_price}")
+                            st.success(f"✅ Processed item {items_found}: Item# {parts[0]}, Qty {ordered_qty}, Price {price}")
                             
                         except (ValueError, IndexError) as e:
                             errors.append(f"Error parsing numeric values on line {line_num}: {e}")
