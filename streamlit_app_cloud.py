@@ -241,25 +241,41 @@ class PDFExtractor:
             if PDFPLUMBER_AVAILABLE:
                 # Use pdfplumber if available
                 with pdfplumber.open(pdf_file) as pdf:
+                    st.info(f"📄 Processing PDF with {len(pdf.pages)} pages")
+                    
                     for page_num, page in enumerate(pdf.pages, 1):
                         try:
                             text = page.extract_text()
                             if not text:
                                 logger.warning(f"No text extracted from page {page_num}")
+                                st.warning(f"⚠️ No text extracted from page {page_num}")
                                 continue
                                 
                             lines = text.split('\n')
+                            st.info(f"📋 Page {page_num}: Found {len(lines)} lines")
+                            
+                            # Debug: Show first few lines to understand the format
+                            if page_num == 1:
+                                st.info("🔍 First 10 lines of PDF:")
+                                for i, line in enumerate(lines[:10]):
+                                    st.write(f"  Line {i+1}: '{line}'")
+                            
                             data, errors = PDFExtractor._process_lines(lines, current_po, data, errors, page_num)
                                 
                         except Exception as e:
                             errors.append(f"Error processing page {page_num}: {e}")
+                            st.error(f"❌ Error processing page {page_num}: {e}")
                             continue
+                            
+                    st.info(f"📊 PDF processing complete. Found {len(data)} data entries and {len(errors)} errors")
+                    
             else:
                 # Fallback: Try to extract text using alternative method
                 st.error("❌ PDF processing is not available in this environment. Please use the standalone converter for PDF processing.")
                 return [], ["PDF processing not available in Streamlit Cloud environment"]
                         
         except Exception as e:
+            st.error(f"❌ Failed to open or process PDF: {e}")
             raise Exception(f"Failed to open or process PDF: {e}")
         
         return data, errors
@@ -267,11 +283,16 @@ class PDFExtractor:
     @staticmethod
     def _process_lines(lines: List[str], current_po: Dict, data: List[Dict], errors: List[str], page_num: int) -> Tuple[List[Dict], List[str]]:
         """Process lines from PDF text"""
+        po_found = False
+        items_found = 0
+        
         for line_num, line in enumerate(lines, 1):
             try:
                 # Extract PO Number with improved pattern
                 if po_match := re.search(r'PO\s*No\.?\s*:?\s*(\d+)', line, re.IGNORECASE):
                     current_po['PO No.'] = po_match.group(1)
+                    po_found = True
+                    st.success(f"✅ Found PO No.: {po_match.group(1)} on line {line_num}")
                 
                 # Extract Store Name and Store ID with more flexible pattern
                 store_patterns = [
@@ -288,6 +309,7 @@ class PDFExtractor:
                         else:
                             current_po['Store Name'] = store_match.group(1).strip()
                             current_po['Store ID'] = store_match.group(2)
+                        st.success(f"✅ Found Store: {current_po.get('Store Name', '')} - {current_po.get('Store ID', '')} on line {line_num}")
                         break
                 
                 # Extract Dates with validation
@@ -302,6 +324,7 @@ class PDFExtractor:
                         date_str = date_match.group(1)
                         if PDFExtractor.validate_date(date_str):
                             current_po[field_name] = date_str
+                            st.success(f"✅ Found {field_name}: {date_str} on line {line_num}")
                         else:
                             errors.append(f"Invalid date format: {date_str} on line {line_num}")
                         break
@@ -356,6 +379,10 @@ class PDFExtractor:
                                 'Ordered Qty': ordered_qty,
                                 'Price': unit_price  # Store unit price, not total price
                             })
+                            
+                            items_found += 1
+                            st.success(f"✅ Processed item {items_found}: Item# {parts[0]}, Qty {ordered_qty}, Price {unit_price}")
+                            
                         except (ValueError, IndexError) as e:
                             errors.append(f"Error parsing numeric values on line {line_num}: {e}")
                     else:
@@ -369,6 +396,11 @@ class PDFExtractor:
                 errors.append(f"Error processing line {line_num}: {e}")
                 continue
         
+        if not po_found:
+            st.warning("⚠️ No PO Number found in the PDF")
+        if items_found == 0:
+            st.warning("⚠️ No item lines found in the PDF")
+            
         return data, errors
 
 class OdooConverter:
