@@ -312,22 +312,38 @@ class PDFExtractor:
                     if len(parts) < 4:
                         continue
                         
-                    # Find numeric values (quantities and prices)
-                    numeric_values = [part for part in parts if re.match(r'^\d+\.\d{2}$', part)]
+                    # Find all numeric values in the line
+                    numeric_values = []
+                    for part in parts:
+                        # Match both integer and decimal numbers
+                        if re.match(r'^\d+(\.\d{2})?$', part):
+                            numeric_values.append(float(part))
                     
-                    if len(numeric_values) >= 2:
+                    if len(numeric_values) >= 3:
                         try:
-                            ordered_qty = float(numeric_values[-2])
-                            price = float(numeric_values[-1])
+                            # Based on the format: Item# Quantity UnitPrice TotalPrice
+                            # parts[0] = Item#
+                            # numeric_values[0] = Quantity (second value in line)
+                            # numeric_values[1] = Unit Price (third value in line)
+                            # numeric_values[2] = Total Price (fourth value in line)
+                            
+                            ordered_qty = numeric_values[0]  # Quantity is the first numeric value
+                            unit_price = numeric_values[1]   # Unit price is the second numeric value
+                            total_price = numeric_values[2]   # Total price is the third numeric value
                             
                             # Validate quantities and prices
                             if not PDFExtractor.validate_numeric(str(ordered_qty), 0, 1000000):
                                 errors.append(f"Invalid quantity: {ordered_qty} on line {line_num}")
                                 continue
                                 
-                            if not PDFExtractor.validate_numeric(str(price), 0, 1000000):
-                                errors.append(f"Invalid price: {price} on line {line_num}")
+                            if not PDFExtractor.validate_numeric(str(unit_price), 0, 1000000):
+                                errors.append(f"Invalid unit price: {unit_price} on line {line_num}")
                                 continue
+                            
+                            # Verify the calculation: total_price should equal ordered_qty * unit_price
+                            expected_total = ordered_qty * unit_price
+                            if abs(expected_total - total_price) > 0.01:  # Allow small rounding differences
+                                errors.append(f"Price calculation mismatch on line {line_num}: {ordered_qty} × {unit_price} = {expected_total}, but total is {total_price}")
                             
                             data.append({
                                 'PO No.': current_po['PO No.'],
@@ -337,10 +353,12 @@ class PDFExtractor:
                                 'Delivery Date': current_po.get('Delivery Date', ''),
                                 'Item#': parts[0],
                                 'Ordered Qty': ordered_qty,
-                                'Price': price
+                                'Price': unit_price  # Store unit price, not total price
                             })
                         except (ValueError, IndexError) as e:
                             errors.append(f"Error parsing numeric values on line {line_num}: {e}")
+                    else:
+                        errors.append(f"Insufficient numeric values on line {line_num}: found {len(numeric_values)}, expected at least 3")
                             
             except Exception as e:
                 errors.append(f"Error processing line {line_num}: {e}")
