@@ -619,6 +619,8 @@ def main():
         st.session_state.extraction_errors = []
     if 'conversion_errors' not in st.session_state:
         st.session_state.conversion_errors = []
+    if 'pdf_processing_completed' not in st.session_state:
+        st.session_state.pdf_processing_completed = False
     
     # Sidebar for navigation
     st.sidebar.title("📋 Processing Steps")
@@ -720,6 +722,7 @@ def main():
             if st.session_state.product_variants is not None and st.session_state.store_names is not None:
                 if st.button("Next Step →", type="primary"):
                     st.session_state.step = 2
+                    st.session_state.pdf_processing_completed = False  # Reset PDF processing flag
                     st.rerun()
             else:
                 st.button("Next Step →", disabled=True)
@@ -754,6 +757,19 @@ def main():
                 )
             
             if uploaded_files:
+                # Reset processing flag when new files are uploaded
+                st.session_state.pdf_processing_completed = False
+                
+                # Show file details
+                file_details = []
+                for i, file in enumerate(uploaded_files, 1):
+                    file_details.append({
+                        "File": f"{i}. {file.name}",
+                        "Size": f"{file.size / 1024:.1f} KB"
+                    })
+                
+                st.dataframe(pd.DataFrame(file_details), use_container_width=True)
+                
                 # Process files
                 if st.button("Process Files", type="primary"):
                     with st.spinner("Processing files..."):
@@ -829,6 +845,9 @@ def main():
             )
             
             if uploaded_files:
+                # Reset processing flag when new files are uploaded
+                st.session_state.pdf_processing_completed = False
+                
                 # Show file details
                 file_details = []
                 for i, file in enumerate(uploaded_files, 1):
@@ -879,36 +898,44 @@ def main():
                             
                             st.session_state.purchase_orders = df
                             st.session_state.extraction_errors = all_errors
-                            
-                            # Show preview
-                            with st.expander("📊 Preview of Extracted Data", expanded=True):
-                                st.dataframe(df.head(20), use_container_width=True)
                         else:
                             st.error("❌ No valid purchase order data found in the uploaded files.")
                             # Set empty dataframe so user can still proceed if needed
                             st.session_state.purchase_orders = pd.DataFrame()
                             st.session_state.extraction_errors = all_errors
                         
-                        # Show errors if any
-                        if all_errors:
-                            with st.expander("⚠️ Processing Warnings", expanded=False):
-                                for error in all_errors[:10]:
-                                    st.warning(error)
-                                if len(all_errors) > 10:
-                                    st.info(f"... and {len(all_errors) - 10} more warnings")
-                        
-                        # Navigation - always show after processing
-                        col1, col2, col3 = st.columns([1, 1, 1])
-                        with col2:
-                            if st.button("Next Step →", type="primary"):
-                                st.session_state.step = 3
-                                st.rerun()
+                        # Mark processing as completed
+                        st.session_state.pdf_processing_completed = True
+                
+                # Show results and navigation only after processing is completed
+                if st.session_state.get('pdf_processing_completed', False):
+                    # Show preview if data exists
+                    if st.session_state.purchase_orders is not None and not st.session_state.purchase_orders.empty:
+                        with st.expander("📊 Preview of Extracted Data", expanded=True):
+                            st.dataframe(st.session_state.purchase_orders.head(20), use_container_width=True)
+                    
+                    # Show errors if any
+                    if st.session_state.get('extraction_errors', []):
+                        with st.expander("⚠️ Processing Warnings", expanded=False):
+                            errors = st.session_state.extraction_errors
+                            for error in errors[:10]:
+                                st.warning(error)
+                            if len(errors) > 10:
+                                st.info(f"... and {len(errors) - 10} more warnings")
+                    
+                    # Navigation - always show after processing
+                    col1, col2, col3 = st.columns([1, 1, 1])
+                    with col2:
+                        if st.button("Next Step →", type="primary"):
+                            st.session_state.step = 3
+                            st.rerun()
         
         # Back button
         col1, col2, col3 = st.columns([1, 1, 1])
         with col1:
             if st.button("← Back"):
-                st.session_state.step = 1
+                st.session_state.step = 2
+                st.session_state.pdf_processing_completed = False  # Reset PDF processing flag
                 st.rerun()
     
     # Step 3: Process & Convert
