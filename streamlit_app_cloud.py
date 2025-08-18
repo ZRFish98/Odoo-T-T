@@ -95,6 +95,50 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+def get_embedded_store_names() -> pd.DataFrame:
+    """Return the embedded store names data"""
+    store_data = [
+        {'Store Official Name': 'T&T Supermarket Inc., Metrotown  - 001', 'Store ID': 1},
+        {'Store Official Name': 'T&T Supermarket Inc., Chinatown  - 003', 'Store ID': 3},
+        {'Store Official Name': 'T&T Supermarket Inc., FirstAvenue  - 004', 'Store ID': 4},
+        {'Store Official Name': 'T&T Supermarket Inc., Osaka  - 005', 'Store ID': 5},
+        {'Store Official Name': 'T&T Supermarket Inc., Surrey  - 006', 'Store ID': 6},
+        {'Store Official Name': 'T&T Supermarket Inc., Calgary  - 007', 'Store ID': 7},
+        {'Store Official Name': 'T&T Supermarket Inc., Coquitlam  - 008', 'Store ID': 8},
+        {'Store Official Name': 'T&T Supermarket Inc., Promenade Store - 009', 'Store ID': 9},
+        {'Store Official Name': 'T&T Supermarket Inc., Edmonton  - 010', 'Store ID': 10},
+        {'Store Official Name': 'T&T Supermarket Inc., Warden&Steels Store - 011', 'Store ID': 11},
+        {'Store Official Name': 'T&T Supermarket Inc., Central City  - 013', 'Store ID': 13},
+        {'Store Official Name': 'T&T Supermarket Inc., Harvest Hills  - 014', 'Store ID': 14},
+        {'Store Official Name': 'T&T Supermarket Inc., Central Parkway Store - 015', 'Store ID': 15},
+        {'Store Official Name': 'T&T Supermarket Inc., Northtown Edmonton  - 017', 'Store ID': 17},
+        {'Store Official Name': 'T&T Supermarket Inc., Ottawa Store - 018', 'Store ID': 18},
+        {'Store Official Name': 'T&T Supermarket Inc., Park Royal  - 019', 'Store ID': 19},
+        {'Store Official Name': 'T&T Supermarket Inc., Weldrick Store - 020', 'Store ID': 20},
+        {'Store Official Name': 'T&T Supermarket Inc., Woodbine Store - 021', 'Store ID': 21},
+        {'Store Official Name': 'T&T Supermarket Inc., Unionville Store - 022', 'Store ID': 22},
+        {'Store Official Name': 'T&T Supermarket Inc., Ora  - 023', 'Store ID': 23},
+        {'Store Official Name': 'T&T Supermarket Inc., SE Edmonton  - 024', 'Store ID': 24},
+        {'Store Official Name': 'T&T Supermarket Inc., Marine Gateway  - 025', 'Store ID': 25},
+        {'Store Official Name': 'T&T Supermarket Inc., Lansdowne  - 026', 'Store ID': 26},
+        {'Store Official Name': 'T&T Supermarket Inc., Aurora Store - 027', 'Store ID': 27},
+        {'Store Official Name': 'T&T Supermarket Inc., Waterloo Store - 028', 'Store ID': 28},
+        {'Store Official Name': 'T&T Supermarket Inc., Kingsway  - 029', 'Store ID': 29},
+        {'Store Official Name': 'T&T Supermarket Inc., Deerfoot  - 030', 'Store ID': 30},
+        {'Store Official Name': 'T&T Supermarket Inc., Langley  - 031', 'Store ID': 31},
+        {'Store Official Name': 'T&T Supermarket Inc., College Store - 032', 'Store ID': 32},
+        {'Store Official Name': 'T&T Supermarket Inc., Sage Hill  - 033', 'Store ID': 33},
+        {'Store Official Name': 'T&T Supermarket Inc., St.Croix Store - 034', 'Store ID': 34},
+        {'Store Official Name': 'T&T Supermarket Inc., Fairview Mall Store - 035', 'Store ID': 35},
+        {'Store Official Name': 'T&T Supermarket Inc., Lougheed  - 036', 'Store ID': 36},
+        {'Store Official Name': 'T&T Supermarket Inc., London Store - 037', 'Store ID': 37},
+        {'Store Official Name': 'T&T Supermarket Inc., Downtown Store - 038', 'Store ID': 38},
+        {'Store Official Name': 'T&T Supermarket Inc., Kanata Store - 039', 'Store ID': 39},
+        {'Store Official Name': 'T&T Supermarket Inc., Brossard Store - 040', 'Store ID': 40}
+    ]
+    
+    return pd.DataFrame(store_data)
+
 def read_excel_file(file) -> pd.DataFrame:
     """Read Excel file with fallback options for different engines"""
     try:
@@ -596,10 +640,10 @@ def main():
     st.markdown('<h1 class="main-header">🛒 T&T Purchase Order Processor</h1>', unsafe_allow_html=True)
     st.markdown("---")
     
-    st.info("📋 Upload your files to convert purchase orders to Odoo format")
+    st.info("📋 Upload your Product Variants and Purchase Orders files to convert to Odoo format (Store Names are automatically loaded)")
     
     # File uploads in columns
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     
     with col1:
         st.markdown('<h3 class="section-header">📦 Product Variants</h3>', unsafe_allow_html=True)
@@ -641,45 +685,25 @@ def main():
                 st.error(f"❌ Error loading file: {e}")
     
     with col2:
-        st.markdown('<h3 class="section-header">🏪 Store Names</h3>', unsafe_allow_html=True)
+        st.markdown('<h3 class="section-header">🏪 Store Names (Embedded)</h3>', unsafe_allow_html=True)
         
-        # File type selection
-        store_file_type = st.radio(
-            "Select file type:",
-            ["Excel (.xlsx)", "CSV (.csv)"],
-            key="store_names_type"
-        )
+        # Use embedded store names data
+        store_names = get_embedded_store_names()
         
-        if store_file_type == "Excel (.xlsx)":
-            store_names_file = st.file_uploader(
-                "Upload Store Names file",
-                type=['xlsx'],
-                key="store_names"
-            )
+        if not store_names.empty:
+            st.success(f"✅ Loaded {len(store_names)} stores (embedded data)")
+            st.dataframe(store_names.head(3), use_container_width=True)
+            
+            # Show store count info
+            st.info(f"📊 Total stores available: {len(store_names)}")
+            
+            # Optional: Show all stores in expandable section
+            with st.expander("📋 View All Stores", expanded=False):
+                st.dataframe(store_names, use_container_width=True)
         else:
-            store_names_file = st.file_uploader(
-                "Upload Store Names file",
-                type=['csv'],
-                key="store_names"
-            )
-        
-        store_names = None
-        if store_names_file:
-            try:
-                if store_file_type == "Excel (.xlsx)":
-                    store_names = read_excel_file(store_names_file)
-                else:
-                    store_names = read_csv_file(store_names_file)
-                
-                if not store_names.empty:
-                    st.success(f"✅ Loaded {len(store_names)} stores")
-                    st.dataframe(store_names.head(3), use_container_width=True)
-                else:
-                    st.error("❌ File is empty")
-            except Exception as e:
-                st.error(f"❌ Error loading file: {e}")
+            st.error("❌ Failed to load embedded store data")
     
-    with col3:
+    with col2:
         st.markdown('<h3 class="section-header">🛒 Purchase Orders</h3>', unsafe_allow_html=True)
         
         # File type selection
@@ -739,8 +763,8 @@ def main():
     st.markdown("---")
     st.markdown('<h2 class="section-header">🔄 Process & Convert</h2>', unsafe_allow_html=True)
     
-    # Check if all files are uploaded
-    if product_variants is not None and store_names is not None and purchase_orders is not None:
+    # Check if required files are uploaded (store names are now embedded)
+    if product_variants is not None and purchase_orders is not None:
         if st.button("🚀 Convert to Odoo Format", type="primary", use_container_width=True):
             with st.spinner("Converting to Odoo format..."):
                 try:
@@ -841,18 +865,18 @@ def main():
                     st.dataframe(store_names.head(3))
     
     else:
-        st.info("📋 Please upload all three files to proceed with conversion")
+        st.info("📋 Please upload the required files to proceed with conversion")
         
         missing_files = []
         if product_variants is None:
             missing_files.append("Product Variants")
-        if store_names is None:
-            missing_files.append("Store Names")
         if purchase_orders is None:
             missing_files.append("Purchase Orders")
         
         if missing_files:
             st.warning(f"⚠️ Missing files: {', '.join(missing_files)}")
+        
+        st.success("✅ Store Names are automatically loaded (embedded data)")
     
     # Help section
     with st.sidebar:
@@ -860,10 +884,10 @@ def main():
         st.markdown("""
         **How to use this tool:**
         
-        1. **Upload Files**: Upload all three required files
+        1. **Upload Files**: Upload the required files
            - Product Variants (Excel/CSV)
-           - Store Names (Excel/CSV)
            - Purchase Orders (Excel/CSV)
+           - Store Names are automatically loaded (embedded data)
         
         2. **Convert**: Click "Convert to Odoo Format" button
         
@@ -871,7 +895,7 @@ def main():
         
         **Required File Formats:**
         - **Product Variants**: Must contain columns like 'Internal Reference', 'Barcode', 'Name', 'Units Per Order'
-        - **Store Names**: Must contain 'Store ID' and 'Store Official Name'
+        - **Store Names**: Automatically loaded (37 stores embedded - all T&T locations)
         - **Purchase Orders**: Must contain 'Store ID', 'Store Name', 'PO No.', 'Order Date', 'Delivery Date', 'Internal Reference', '# of Order', 'Price'
         
         **Features:**
