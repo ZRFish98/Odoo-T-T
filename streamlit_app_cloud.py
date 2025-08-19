@@ -350,6 +350,35 @@ class OdooConverter:
             self.expanded_orders = pd.DataFrame()
             return errors
         
+        # Validate data structure before processing
+        if 'Internal Reference' not in self.product_variants.columns:
+            error_msg = "Product variants missing 'Internal Reference' column"
+            errors.append(error_msg)
+            st.error(f"❌ {error_msg}")
+            self.expanded_orders = pd.DataFrame()
+            return errors
+        
+        if 'Units Per Order' not in self.product_variants.columns:
+            error_msg = "Product variants missing 'Units Per Order' column"
+            errors.append(error_msg)
+            st.error(f"❌ {error_msg}")
+            self.expanded_orders = pd.DataFrame()
+            return errors
+        
+        if 'Price' not in self.purchase_orders.columns:
+            error_msg = "Purchase orders missing 'Price' column"
+            errors.append(error_msg)
+            st.error(f"❌ {error_msg}")
+            self.expanded_orders = pd.DataFrame()
+            return errors
+        
+        if '# of Order' not in self.purchase_orders.columns:
+            error_msg = "Purchase orders missing '# of Order' column"
+            errors.append(error_msg)
+            st.error(f"❌ {error_msg}")
+            self.expanded_orders = pd.DataFrame()
+            return errors
+        
         # Find internal references with multiple products
         ref_counts = self.product_variants['Internal Reference'].value_counts()
         multi_product_refs = ref_counts[ref_counts > 1].index.tolist()
@@ -380,90 +409,168 @@ class OdooConverter:
         # Create expanded purchase orders for multi-product references
         expanded_orders = []
         
+        # Debug: Show sample data
+        st.write("🔍 Debug: Sample purchase order data:")
+        st.write(f"Sample row: {self.purchase_orders.iloc[0].to_dict()}")
+        st.write(f"Sample product: {self.product_variants.iloc[0].to_dict()}")
+        
+        # Debug: Show data types and check for issues
+        st.write("🔍 Debug: Data types and validation:")
+        st.write(f"Purchase Orders Price column type: {self.purchase_orders['Price'].dtype}")
+        st.write(f"Product Variants Units Per Order column type: {self.product_variants['Units Per Order'].dtype}")
+        st.write(f"Purchase Orders # of Order column type: {self.purchase_orders['# of Order'].dtype}")
+        
+        # Check for any NaN or invalid values
+        price_nan_count = self.purchase_orders['Price'].isna().sum()
+        units_nan_count = self.product_variants['Units Per Order'].isna().sum()
+        order_nan_count = self.purchase_orders['# of Order'].isna().sum()
+        
+        st.write(f"Price column NaN count: {price_nan_count}")
+        st.write(f"Units Per Order NaN count: {units_nan_count}")
+        st.write(f"# of Order NaN count: {order_nan_count}")
+        
         for _, row in self.purchase_orders.iterrows():
-            internal_ref = row['Internal Reference']
-            
-            if internal_ref in multi_product_refs:
-                # Get all products for this internal reference
-                products = self.product_variants[self.product_variants['Internal Reference'] == internal_ref]
+            try:
+                internal_ref = row['Internal Reference']
                 
-                if len(products) == 0:
-                    error_msg = f"No products found for multi-product reference: {internal_ref}"
-                    errors.append(error_msg)
-                    continue
-                
-                # Calculate units per product (distribute equally)
-                try:
-                    total_units = row['# of Order'] * products.iloc[0]['Units Per Order']
-                    units_per_product = total_units / len(products)
+                if internal_ref in multi_product_refs:
+                    # Get all products for this internal reference
+                    products = self.product_variants[self.product_variants['Internal Reference'] == internal_ref]
                     
-                    # Create a line for each product
-                    for i, (_, product) in enumerate(products.iterrows()):
-                        # Distribute units as evenly as possible
-                        if i == 0:
-                            # First product gets the remainder
-                            actual_units = int(units_per_product) + (total_units % len(products))
-                        else:
-                            actual_units = int(units_per_product)
-                        
-                        # Calculate unit price - IMPROVED CALCULATION
-                        unit_price = row['Price'] / product['Units Per Order']
-                        
-                        expanded_orders.append({
-                            'Store ID': row['Store ID'],
-                            'Store Name': row['Store Name'],
-                            'Store Official Name': row['Store Official Name'],
-                            'PO No.': row['PO No.'],
-                            'Order Date': row['Order Date'],
-                            'Delivery Date': row['Delivery Date'],
-                            'Internal Reference': internal_ref,
-                            'Barcode': product['Barcode'],
-                            'Product Name': product['Name'],
-                            'Units Per Order': product['Units Per Order'],
-                            'Original Order Quantity': row['# of Order'],
-                            'Total Units': actual_units,
-                            'Unit Price': unit_price,
-                            'Total Price': actual_units * unit_price,
-                            'Is Multi Product': True
-                        })
-                
-                except Exception as e:
-                    error_msg = f"Error processing multi-product reference {internal_ref}: {e}"
-                    errors.append(error_msg)
-                    
-            else:
-                # Single product reference - keep as is
-                product = self.product_variants[self.product_variants['Internal Reference'] == internal_ref]
-                if len(product) > 0:
-                    product = product.iloc[0]
-                    try:
-                        total_units = row['# of Order'] * product['Units Per Order']
-                        # Calculate unit price - IMPROVED CALCULATION
-                        unit_price = row['Price'] / product['Units Per Order']
-                        
-                        expanded_orders.append({
-                            'Store ID': row['Store ID'],
-                            'Store Name': row['Store Name'],
-                            'Store Official Name': row['Store Official Name'],
-                            'PO No.': row['PO No.'],
-                            'Order Date': row['Order Date'],
-                            'Delivery Date': row['Delivery Date'],
-                            'Internal Reference': internal_ref,
-                            'Barcode': product['Barcode'],
-                            'Product Name': product['Name'],
-                            'Units Per Order': product['Units Per Order'],
-                            'Original Order Quantity': row['# of Order'],
-                            'Total Units': total_units,
-                            'Unit Price': unit_price,
-                            'Total Price': total_units * unit_price,
-                            'Is Multi Product': False
-                        })
-                    except Exception as e:
-                        error_msg = f"Error processing single product reference {internal_ref}: {e}"
+                    if len(products) == 0:
+                        error_msg = f"No products found for multi-product reference: {internal_ref}"
                         errors.append(error_msg)
+                        continue
+                    
+                    # Calculate units per product (distribute equally)
+                    try:
+                        total_units = row['# of Order'] * products.iloc[0]['Units Per Order']
+                        units_per_product = total_units / len(products)
+                        
+                        # Create a line for each product
+                        for i, (_, product) in enumerate(products.iterrows()):
+                            # Distribute units as evenly as possible
+                            if i == 0:
+                                # First product gets the remainder
+                                actual_units = int(units_per_product) + (total_units % len(products))
+                            else:
+                                actual_units = int(units_per_product)
+                            
+                            # Calculate unit price - IMPROVED CALCULATION with validation
+                            if pd.isna(product['Units Per Order']) or product['Units Per Order'] <= 0:
+                                error_msg = f"Invalid Units Per Order for product {internal_ref}: {product['Units Per Order']}"
+                                errors.append(error_msg)
+                                continue
+                            
+                            if pd.isna(row['Price']) or row['Price'] <= 0:
+                                error_msg = f"Invalid Price for order {row['PO No.']}: {row['Price']}"
+                                errors.append(error_msg)
+                                continue
+                            
+                            unit_price = row['Price'] / product['Units Per Order']
+                            
+                            # Calculate Total Price with validation
+                            try:
+                                total_price = actual_units * unit_price
+                                if pd.isna(total_price) or pd.isinf(total_price):
+                                    error_msg = f"Invalid Total Price calculation for {internal_ref}: units={actual_units}, unit_price={unit_price}, result={total_price}"
+                                    errors.append(error_msg)
+                                    continue
+                            except Exception as e:
+                                error_msg = f"Error calculating Total Price for {internal_ref}: {e}"
+                                errors.append(error_msg)
+                                continue
+                            
+                            expanded_orders.append({
+                                'Store ID': row['Store ID'],
+                                'Store Name': row['Store Name'],
+                                'Store Official Name': row['Store Official Name'],
+                                'PO No.': row['PO No.'],
+                                'Order Date': row['Order Date'],
+                                'Delivery Date': row['Delivery Date'],
+                                'Internal Reference': internal_ref,
+                                'Barcode': product['Barcode'],
+                                'Product Name': product['Name'],
+                                'Units Per Order': product['Units Per Order'],
+                                'Original Order Quantity': row['# of Order'],
+                                'Total Units': actual_units,
+                                'Unit Price': unit_price,
+                                'Total Price': total_price,
+                                'Is Multi Product': True
+                            })
+                    
+                    except Exception as e:
+                        error_msg = f"Error processing multi-product reference {internal_ref}: {e}"
+                        errors.append(error_msg)
+                        
                 else:
-                    error_msg = f"No product found for internal reference: {internal_ref}"
-                    errors.append(error_msg)
+                    # Single product reference - keep as is
+                    product = self.product_variants[self.product_variants['Internal Reference'] == internal_ref]
+                    if len(product) > 0:
+                        product = product.iloc[0]
+                        try:
+                            # Validate data before calculations
+                            if pd.isna(product['Units Per Order']) or product['Units Per Order'] <= 0:
+                                error_msg = f"Invalid Units Per Order for product {internal_ref}: {product['Units Per Order']}"
+                                errors.append(error_msg)
+                                continue
+                            
+                            if pd.isna(row['Price']) or row['Price'] <= 0:
+                                error_msg = f"Invalid Price for order {row['PO No.']}: {row['Price']}"
+                                errors.append(error_msg)
+                                continue
+                            
+                            if pd.isna(row['# of Order']) or row['# of Order'] <= 0:
+                                error_msg = f"Invalid Order Quantity for order {row['PO No.']}: {row['# of Order']}"
+                                errors.append(error_msg)
+                                continue
+                            
+                            total_units = row['# of Order'] * product['Units Per Order']
+                            # Calculate unit price - IMPROVED CALCULATION
+                            unit_price = row['Price'] / product['Units Per Order']
+                            
+                            # Calculate Total Price with validation
+                            try:
+                                total_price = total_units * unit_price
+                                if pd.isna(total_price) or pd.isinf(total_price):
+                                    error_msg = f"Invalid Total Price calculation for {internal_ref}: units={total_units}, unit_price={unit_price}, result={total_price}"
+                                    errors.append(error_msg)
+                                    continue
+                            except Exception as e:
+                                error_msg = f"Error calculating Total Price for {internal_ref}: {e}"
+                                errors.append(error_msg)
+                                continue
+                            
+                            expanded_orders.append({
+                                'Store ID': row['Store ID'],
+                                'Store Name': row['Store Name'],
+                                'Store Official Name': row['Store Official Name'],
+                                'PO No.': row['PO No.'],
+                                'Order Date': row['Order Date'],
+                                'Delivery Date': row['Delivery Date'],
+                                'Internal Reference': internal_ref,
+                                'Barcode': product['Barcode'],
+                                'Product Name': product['Name'],
+                                'Units Per Order': product['Units Per Order'],
+                                'Original Order Quantity': row['# of Order'],
+                                'Total Units': total_units,
+                                'Unit Price': unit_price,
+                                'Total Price': total_price,
+                                'Is Multi Product': False
+                            })
+                        except Exception as e:
+                            error_msg = f"Error processing single product reference {internal_ref}: {e}"
+                            errors.append(error_msg)
+                    else:
+                        error_msg = f"No product found for internal reference: {internal_ref}"
+                        errors.append(error_msg)
+            except Exception as e:
+                error_msg = f"Unexpected error processing row {row.get('PO No.', 'Unknown')}: {e}"
+                errors.append(error_msg)
+                st.error(f"❌ {error_msg}")
+                st.write(f"Error details: {str(e)}")
+                import traceback
+                st.write(f"Traceback: {traceback.format_exc()}")
         
         if not expanded_orders:
             error_msg = "No expanded orders were created - check product variants matching"
@@ -497,6 +604,15 @@ class OdooConverter:
         # Aggregate products by store and product
         st.info("🔄 Aggregating products by store and product...")
         
+        # Validate required columns exist
+        required_columns = ['Total Price', 'Total Units', 'Original Order Quantity']
+        missing_columns = [col for col in required_columns if col not in self.expanded_orders.columns]
+        if missing_columns:
+            st.error(f"❌ Missing required columns for aggregation: {missing_columns}")
+            st.write("Available columns:", list(self.expanded_orders.columns))
+            self.order_line_details = pd.DataFrame()
+            return
+        
         # Group by store and product to aggregate quantities and prices
         aggregation_groups = self.expanded_orders.groupby([
             'Store ID', 'Store Name', 'Store Official Name', 
@@ -511,8 +627,22 @@ class OdooConverter:
             'Is Multi Product': 'first'  # Keep the multi-product flag
         }).reset_index()
         
-        # Calculate aggregated unit price
-        aggregation_groups['Unit Price'] = aggregation_groups['Total Price'] / aggregation_groups['Total Units']
+        # Calculate aggregated unit price with validation
+        try:
+            aggregation_groups['Unit Price'] = aggregation_groups['Total Price'] / aggregation_groups['Total Units']
+            
+            # Check for any invalid unit prices
+            invalid_prices = aggregation_groups[aggregation_groups['Unit Price'].isna() | aggregation_groups['Unit Price'].isinf()]
+            if not invalid_prices.empty:
+                st.warning(f"⚠️ Found {len(invalid_prices)} rows with invalid unit prices")
+                st.write("Invalid price rows:", invalid_prices[['Store ID', 'Internal Reference', 'Total Price', 'Total Units']].head())
+                
+        except Exception as e:
+            st.error(f"❌ Error calculating aggregated unit prices: {e}")
+            st.write("Data types in aggregation_groups:")
+            st.write(aggregation_groups.dtypes)
+            self.order_line_details = pd.DataFrame()
+            return
         
         # Create aggregated order line details
         line_details = []
@@ -750,6 +880,13 @@ def main():
                     product_variants = read_csv_file(product_variants_file)
                 
                 if not product_variants.empty:
+                    # Clean column names
+                    product_variants.columns = product_variants.columns.str.strip()
+                    
+                    # Convert numeric columns
+                    if 'Units Per Order' in product_variants.columns:
+                        product_variants['Units Per Order'] = pd.to_numeric(product_variants['Units Per Order'], errors='coerce')
+                    
                     st.success(f"✅ Loaded {len(product_variants)} products")
                     st.dataframe(product_variants.head(3), use_container_width=True)
                 else:
@@ -813,9 +950,11 @@ def main():
                     if '# of Order ' in purchase_orders.columns:
                         purchase_orders = purchase_orders.rename(columns={'# of Order ': '# of Order'})
                     
-                    # Convert to numeric for proper sorting
+                    # Convert to numeric for proper sorting and calculations
                     purchase_orders['Store ID'] = pd.to_numeric(purchase_orders['Store ID'], errors='coerce')
                     purchase_orders['PO No.'] = pd.to_numeric(purchase_orders['PO No.'], errors='coerce')
+                    purchase_orders['# of Order'] = pd.to_numeric(purchase_orders['# of Order'], errors='coerce')
+                    purchase_orders['Price'] = pd.to_numeric(purchase_orders['Price'], errors='coerce')
                     
                     # Sort by Store ID and PO No.
                     purchase_orders = purchase_orders.sort_values(by=['Store ID', 'PO No.'], ascending=[True, True])
@@ -945,6 +1084,12 @@ def main():
                     st.write(f"Product Variants columns: {list(product_variants.columns)}")
                     st.write(f"Store Names columns: {list(store_names.columns)}")
                     
+                    # Show data types and sample values
+                    st.write("📋 Purchase Orders data types:")
+                    st.write(purchase_orders.dtypes)
+                    st.write("📋 Product Variants data types:")
+                    st.write(product_variants.dtypes)
+                    
                     # Show first few rows of each dataset
                     st.write("Purchase Orders sample:")
                     st.dataframe(purchase_orders.head(3))
@@ -952,6 +1097,17 @@ def main():
                     st.dataframe(product_variants.head(3))
                     st.write("Store Names sample:")
                     st.dataframe(store_names.head(3))
+                    
+                    # Show any NaN or invalid values
+                    st.write("🔍 Checking for invalid data:")
+                    if 'Price' in purchase_orders.columns:
+                        st.write(f"Price column - NaN count: {purchase_orders['Price'].isna().sum()}")
+                        st.write(f"Price column - Zero/negative count: {(purchase_orders['Price'] <= 0).sum()}")
+                        st.write(f"Price column sample values: {purchase_orders['Price'].head(10).tolist()}")
+                    if 'Units Per Order' in product_variants.columns:
+                        st.write(f"Units Per Order - NaN count: {product_variants['Units Per Order'].isna().sum()}")
+                        st.write(f"Units Per Order - Zero/negative count: {(product_variants['Units Per Order'] <= 0).sum()}")
+                        st.write(f"Units Per Order sample values: {product_variants['Units Per Order'].head(10).tolist()}")
     
     else:
         st.info("📋 Please upload the required files to proceed with conversion")
