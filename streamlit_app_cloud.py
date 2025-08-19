@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-T&T Purchase Order Processor - Simplified Version
-Upload purchase_orders.xlsx and convert to Odoo format.
+T&T Purchase Order Processor - Version with Embedded Store Names
+Upload purchase_orders.xlsx and product_variants.xlsx to convert to Odoo format.
+Store names are now embedded in the code.
 """
 
 import streamlit as st
@@ -14,6 +15,55 @@ from io import BytesIO, StringIO
 import subprocess
 import sys
 import re
+
+# Embedded Store Names - No need to upload store names file anymore!
+EMBEDDED_STORE_NAMES = {
+    1: "T&T Supermarket Inc., Metrotown  - 001",
+    3: "T&T Supermarket Inc., Chinatown  - 003",
+    4: "T&T Supermarket Inc., First Avenue  - 004",
+    5: "T&T Supermarket Inc., Osaka  - 005",
+    6: "T&T Supermarket Inc., Surrey  - 006",
+    7: "T&T Supermarket Inc., Calgary  - 007",
+    8: "T&T Supermarket Inc., Coquitlam  - 008",
+    9: "T&T Supermarket Inc., Promenade Store - 009",
+    10: "T&T Supermarket Inc., Edmonton  - 010",
+    11: "T&T Supermarket Inc., Warden&Steels Store - 011",
+    13: "T&T Supermarket Inc., Central City  - 013",
+    14: "T&T Supermarket Inc., Harvest Hills  - 014",
+    15: "T&T Supermarket Inc., Central Parkway Store - 015",
+    17: "T&T Supermarket Inc., Northtown Edmonton  - 017",
+    18: "T&T Supermarket Inc., Ottawa Store - 018",
+    19: "T&T Supermarket Inc., Park Royal  - 019",
+    20: "T&T Supermarket Inc., Weldrick Store - 020",
+    21: "T&T Supermarket Inc., Woodbine Store - 021",
+    22: "T&T Supermarket Inc., Unionville Store - 022",
+    23: "T&T Supermarket Inc., Ora  - 023",
+    24: "T&T Supermarket Inc., SE Edmonton  - 024",
+    25: "T&T Supermarket Inc., Marine Gateway  - 025",
+    26: "T&T Supermarket Inc., Lansdowne  - 026",
+    27: "T&T Supermarket Inc., Aurora Store - 027",
+    28: "T&T Supermarket Inc., Waterloo Store - 028",
+    29: "T&T Supermarket Inc., Kingsway  - 029",
+    30: "T&T Supermarket Inc., Deerfoot  - 030",
+    31: "T&T Supermarket Inc., Langley  - 031",
+    32: "T&T Supermarket Inc., College Store - 032",
+    33: "T&T Supermarket Inc., Sage Hill  - 033",
+    34: "T&T Supermarket Inc., St.Croix Store - 034",
+    35: "T&T Supermarket Inc., Fairview Mall Store - 035",
+    36: "T&T Supermarket Inc., Lougheed  - 036",
+    37: "T&T Supermarket Inc., London Store - 037",
+    38: "T&T Supermarket Inc., Downtown Store - 038",
+    39: "T&T Supermarket Inc., Kanata Store - 039",
+    40: "T&T Supermarket Inc., Brossard Store - 040"
+}
+
+def get_embedded_store_names() -> pd.DataFrame:
+    """Return the embedded store names as a DataFrame"""
+    store_data = [
+        {'Store ID': store_id, 'Store Official Name': official_name}
+        for store_id, official_name in EMBEDDED_STORE_NAMES.items()
+    ]
+    return pd.DataFrame(store_data)
 
 # Force install required packages if not available
 def install_package(package):
@@ -52,7 +102,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for better styling
+# Enhanced CSS for better styling
 st.markdown("""
 <style>
     .main-header {
@@ -61,6 +111,9 @@ st.markdown("""
         color: #1f77b4;
         text-align: center;
         margin-bottom: 2rem;
+        background: linear-gradient(90deg, #1f77b4, #ff7f0e);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
     }
     .section-header {
         font-size: 1.5rem;
@@ -68,76 +121,41 @@ st.markdown("""
         color: #2c3e50;
         margin-bottom: 1rem;
         padding: 0.5rem;
-        background-color: #ecf0f1;
-        border-radius: 5px;
+        background: linear-gradient(135deg, #ecf0f1, #d5dbdb);
+        border-radius: 8px;
+        border-left: 4px solid #3498db;
     }
     .success-box {
-        background-color: #d4edda;
+        background: linear-gradient(135deg, #d4edda, #c3e6cb);
         border: 1px solid #c3e6cb;
-        border-radius: 5px;
+        border-radius: 8px;
         padding: 1rem;
         margin: 1rem 0;
     }
     .warning-box {
-        background-color: #fff3cd;
+        background: linear-gradient(135deg, #fff3cd, #ffeaa7);
         border: 1px solid #ffeaa7;
-        border-radius: 5px;
+        border-radius: 8px;
         padding: 1rem;
         margin: 1rem 0;
     }
     .error-box {
-        background-color: #f8d7da;
+        background: linear-gradient(135deg, #f8d7da, #f5c6cb);
         border: 1px solid #f5c6cb;
-        border-radius: 5px;
+        border-radius: 8px;
         padding: 1rem;
         margin: 1rem 0;
     }
+    .embedded-info {
+        background: linear-gradient(135deg, #e8f4fd, #d1ecf1);
+        border: 1px solid #bee5eb;
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 1rem 0;
+        border-left: 4px solid #17a2b8;
+    }
 </style>
 """, unsafe_allow_html=True)
-
-def get_embedded_store_names() -> pd.DataFrame:
-    """Return the embedded store names data"""
-    store_data = [
-        {'Store Official Name': 'T&T Supermarket Inc., Metrotown  - 001', 'Store ID': 1},
-        {'Store Official Name': 'T&T Supermarket Inc., Chinatown  - 003', 'Store ID': 3},
-        {'Store Official Name': 'T&T Supermarket Inc., FirstAvenue  - 004', 'Store ID': 4},
-        {'Store Official Name': 'T&T Supermarket Inc., Osaka  - 005', 'Store ID': 5},
-        {'Store Official Name': 'T&T Supermarket Inc., Surrey  - 006', 'Store ID': 6},
-        {'Store Official Name': 'T&T Supermarket Inc., Calgary  - 007', 'Store ID': 7},
-        {'Store Official Name': 'T&T Supermarket Inc., Coquitlam  - 008', 'Store ID': 8},
-        {'Store Official Name': 'T&T Supermarket Inc., Promenade Store - 009', 'Store ID': 9},
-        {'Store Official Name': 'T&T Supermarket Inc., Edmonton  - 010', 'Store ID': 10},
-        {'Store Official Name': 'T&T Supermarket Inc., Warden&Steels Store - 011', 'Store ID': 11},
-        {'Store Official Name': 'T&T Supermarket Inc., Central City  - 013', 'Store ID': 13},
-        {'Store Official Name': 'T&T Supermarket Inc., Harvest Hills  - 014', 'Store ID': 14},
-        {'Store Official Name': 'T&T Supermarket Inc., Central Parkway Store - 015', 'Store ID': 15},
-        {'Store Official Name': 'T&T Supermarket Inc., Northtown Edmonton  - 017', 'Store ID': 17},
-        {'Store Official Name': 'T&T Supermarket Inc., Ottawa Store - 018', 'Store ID': 18},
-        {'Store Official Name': 'T&T Supermarket Inc., Park Royal  - 019', 'Store ID': 19},
-        {'Store Official Name': 'T&T Supermarket Inc., Weldrick Store - 020', 'Store ID': 20},
-        {'Store Official Name': 'T&T Supermarket Inc., Woodbine Store - 021', 'Store ID': 21},
-        {'Store Official Name': 'T&T Supermarket Inc., Unionville Store - 022', 'Store ID': 22},
-        {'Store Official Name': 'T&T Supermarket Inc., Ora  - 023', 'Store ID': 23},
-        {'Store Official Name': 'T&T Supermarket Inc., SE Edmonton  - 024', 'Store ID': 24},
-        {'Store Official Name': 'T&T Supermarket Inc., Marine Gateway  - 025', 'Store ID': 25},
-        {'Store Official Name': 'T&T Supermarket Inc., Lansdowne  - 026', 'Store ID': 26},
-        {'Store Official Name': 'T&T Supermarket Inc., Aurora Store - 027', 'Store ID': 27},
-        {'Store Official Name': 'T&T Supermarket Inc., Waterloo Store - 028', 'Store ID': 28},
-        {'Store Official Name': 'T&T Supermarket Inc., Kingsway  - 029', 'Store ID': 29},
-        {'Store Official Name': 'T&T Supermarket Inc., Deerfoot  - 030', 'Store ID': 30},
-        {'Store Official Name': 'T&T Supermarket Inc., Langley  - 031', 'Store ID': 31},
-        {'Store Official Name': 'T&T Supermarket Inc., College Store - 032', 'Store ID': 32},
-        {'Store Official Name': 'T&T Supermarket Inc., Sage Hill  - 033', 'Store ID': 33},
-        {'Store Official Name': 'T&T Supermarket Inc., St.Croix Store - 034', 'Store ID': 34},
-        {'Store Official Name': 'T&T Supermarket Inc., Fairview Mall Store - 035', 'Store ID': 35},
-        {'Store Official Name': 'T&T Supermarket Inc., Lougheed  - 036', 'Store ID': 36},
-        {'Store Official Name': 'T&T Supermarket Inc., London Store - 037', 'Store ID': 37},
-        {'Store Official Name': 'T&T Supermarket Inc., Downtown Store - 038', 'Store ID': 38},
-        {'Store Official Name': 'T&T Supermarket Inc., Kanata Store - 039', 'Store ID': 39},
-        {'Store Official Name': 'T&T Supermarket Inc., Brossard Store - 040', 'Store ID': 40}
-    ]
-    
-    return pd.DataFrame(store_data)
 
 def read_excel_file(file) -> pd.DataFrame:
     """Read Excel file with fallback options for different engines"""
@@ -222,12 +240,12 @@ def validate_and_reorder_columns(df: pd.DataFrame, expected_columns: List[str]) 
     return df
 
 class OdooConverter:
-    """Odoo conversion functionality"""
+    """Odoo conversion functionality with embedded store names"""
     
-    def __init__(self, purchase_orders: pd.DataFrame, product_variants: pd.DataFrame, store_names: pd.DataFrame):
+    def __init__(self, purchase_orders: pd.DataFrame, product_variants: pd.DataFrame):
         self.purchase_orders = purchase_orders
         self.product_variants = product_variants
-        self.store_names = store_names
+        self.store_names = get_embedded_store_names()  # Use embedded store names
         self.order_summaries = None
         self.order_line_details = None
         self.expanded_orders = None
@@ -248,6 +266,7 @@ class OdooConverter:
         st.write("🔍 Debug: Data preparation completed")
         st.write(f"Purchase Orders columns: {list(self.purchase_orders.columns)}")
         st.write(f"Product Variants columns: {list(self.product_variants.columns)}")
+        st.success(f"✅ Using embedded store names ({len(self.store_names)} stores)")
         
     def extract_store_id_from_official_name(self, official_name: str) -> str:
         """Extract store ID from official store name"""
@@ -258,15 +277,11 @@ class OdooConverter:
         return None
         
     def match_store_names(self) -> List[str]:
-        """Match store names with official names using direct Store ID mapping"""
+        """Match store names with official names using embedded store data"""
         errors = []
         
-        # Create a mapping from store ID to official name using the Store ID column
-        store_mapping = {}
-        for _, row in self.store_names.iterrows():
-            store_id = row['Store ID']
-            official_name = row['Store Official Name']
-            store_mapping[store_id] = official_name
+        # Create a mapping from store ID to official name using embedded data
+        store_mapping = dict(zip(self.store_names['Store ID'], self.store_names['Store Official Name']))
         
         # Add official store name to purchase orders
         self.purchase_orders['Store Official Name'] = self.purchase_orders['Store ID'].map(store_mapping)
@@ -277,8 +292,12 @@ class OdooConverter:
             error_msg = f"Unmatched store IDs: {unmatched_stores}"
             errors.append(error_msg)
             st.warning(f"⚠️ {error_msg}")
+            
+            # Show available store IDs for reference
+            available_stores = sorted(self.store_names['Store ID'].unique())
+            st.info(f"📋 Available store IDs in embedded data: {available_stores}")
         else:
-            st.success("✅ All store IDs successfully matched with official names")
+            st.success("✅ All store IDs successfully matched with embedded store names")
         
         # Log successful matches
         matched_count = self.purchase_orders['Store Official Name'].notna().sum()
@@ -350,35 +369,6 @@ class OdooConverter:
             self.expanded_orders = pd.DataFrame()
             return errors
         
-        # Validate data structure before processing
-        if 'Internal Reference' not in self.product_variants.columns:
-            error_msg = "Product variants missing 'Internal Reference' column"
-            errors.append(error_msg)
-            st.error(f"❌ {error_msg}")
-            self.expanded_orders = pd.DataFrame()
-            return errors
-        
-        if 'Units Per Order' not in self.product_variants.columns:
-            error_msg = "Product variants missing 'Units Per Order' column"
-            errors.append(error_msg)
-            st.error(f"❌ {error_msg}")
-            self.expanded_orders = pd.DataFrame()
-            return errors
-        
-        if 'Price' not in self.purchase_orders.columns:
-            error_msg = "Purchase orders missing 'Price' column"
-            errors.append(error_msg)
-            st.error(f"❌ {error_msg}")
-            self.expanded_orders = pd.DataFrame()
-            return errors
-        
-        if '# of Order' not in self.purchase_orders.columns:
-            error_msg = "Purchase orders missing '# of Order' column"
-            errors.append(error_msg)
-            st.error(f"❌ {error_msg}")
-            self.expanded_orders = pd.DataFrame()
-            return errors
-        
         # Find internal references with multiple products
         ref_counts = self.product_variants['Internal Reference'].value_counts()
         multi_product_refs = ref_counts[ref_counts > 1].index.tolist()
@@ -409,295 +399,47 @@ class OdooConverter:
         # Create expanded purchase orders for multi-product references
         expanded_orders = []
         
-        # Debug: Show sample data
-        st.write("🔍 Debug: Sample purchase order data:")
-        st.write(f"Sample row: {self.purchase_orders.iloc[0].to_dict()}")
-        st.write(f"Sample product: {self.product_variants.iloc[0].to_dict()}")
-        
-        # Debug: Show data types and check for issues
-        st.write("🔍 Debug: Data types and validation:")
-        st.write(f"Purchase Orders Price column type: {self.purchase_orders['Price'].dtype}")
-        st.write(f"Product Variants Units Per Order column type: {self.product_variants['Units Per Order'].dtype}")
-        st.write(f"Purchase Orders # of Order column type: {self.purchase_orders['# of Order'].dtype}")
-        
-        # Check for any NaN or invalid values
-        price_nan_count = self.purchase_orders['Price'].isna().sum()
-        units_nan_count = self.product_variants['Units Per Order'].isna().sum()
-        order_nan_count = self.purchase_orders['# of Order'].isna().sum()
-        
-        st.write(f"Price column NaN count: {price_nan_count}")
-        st.write(f"Units Per Order NaN count: {units_nan_count}")
-        st.write(f"# of Order NaN count: {order_nan_count}")
-        
         for _, row in self.purchase_orders.iterrows():
-            try:
-                internal_ref = row['Internal Reference']
+            internal_ref = row['Internal Reference']
+            
+            if internal_ref in multi_product_refs:
+                # Get all products for this internal reference
+                products = self.product_variants[self.product_variants['Internal Reference'] == internal_ref]
                 
-                if internal_ref in multi_product_refs:
-                    # Get all products for this internal reference
-                    products = self.product_variants[self.product_variants['Internal Reference'] == internal_ref]
-                    
-                    if len(products) == 0:
-                        error_msg = f"No products found for multi-product reference: {internal_ref}"
-                        errors.append(error_msg)
-                        continue
-                    
-                    # Calculate units per product (distribute equally)
-                    try:
-                        total_units = row['# of Order'] * products.iloc[0]['Units Per Order']
-                        units_per_product = total_units / len(products)
-                        
-                        # Create a line for each product
-                        for i, (_, product) in enumerate(products.iterrows()):
-                            # Distribute units as evenly as possible
-                            if i == 0:
-                                # First product gets the remainder
-                                actual_units = int(units_per_product) + (total_units % len(products))
-                            else:
-                                actual_units = int(units_per_product)
-                            
-                            # Calculate unit price - IMPROVED CALCULATION with validation
-                            if pd.isna(product['Units Per Order']) or product['Units Per Order'] <= 0:
-                                error_msg = f"Invalid Units Per Order for product {internal_ref}: {product['Units Per Order']}"
-                                errors.append(error_msg)
-                                continue
-                            
-                            if pd.isna(row['Price']) or row['Price'] <= 0:
-                                error_msg = f"Invalid Price for order {row['PO No.']}: {row['Price']}"
-                                errors.append(error_msg)
-                                continue
-                            
-                            unit_price = row['Price'] / product['Units Per Order']
-                            
-                            # Calculate Total Price with validation
-                            try:
-                                total_price = actual_units * unit_price
-                                if pd.isna(total_price) or pd.isinf(total_price):
-                                    error_msg = f"Invalid Total Price calculation for {internal_ref}: units={actual_units}, unit_price={unit_price}, result={total_price}"
-                                    errors.append(error_msg)
-                                    continue
-                            except Exception as e:
-                                error_msg = f"Error calculating Total Price for {internal_ref}: {e}"
-                                errors.append(error_msg)
-                                continue
-                            
-                            expanded_orders.append({
-                                'Store ID': row['Store ID'],
-                                'Store Name': row['Store Name'],
-                                'Store Official Name': row['Store Official Name'],
-                                'PO No.': row['PO No.'],
-                                'Order Date': row['Order Date'],
-                                'Delivery Date': row['Delivery Date'],
-                                'Internal Reference': internal_ref,
-                                'Barcode': product['Barcode'],
-                                'Product Name': product['Name'],
-                                'Units Per Order': product['Units Per Order'],
-                                'Original Order Quantity': row['# of Order'],
-                                'Total Units': actual_units,
-                                'Unit Price': unit_price,
-                                'Total Price': total_price,
-                                'Is Multi Product': True
-                            })
-                    
-                    except Exception as e:
-                        error_msg = f"Error processing multi-product reference {internal_ref}: {e}"
-                        errors.append(error_msg)
-                        
-                else:
-                    # Single product reference - keep as is
-                    product = self.product_variants[self.product_variants['Internal Reference'] == internal_ref]
-                    if len(product) > 0:
-                        product = product.iloc[0]
-                        try:
-                            # Validate data before calculations
-                            if pd.isna(product['Units Per Order']) or product['Units Per Order'] <= 0:
-                                error_msg = f"Invalid Units Per Order for product {internal_ref}: {product['Units Per Order']}"
-                                errors.append(error_msg)
-                                continue
-                            
-                            if pd.isna(row['Price']) or row['Price'] <= 0:
-                                error_msg = f"Invalid Price for order {row['PO No.']}: {row['Price']}"
-                                errors.append(error_msg)
-                                continue
-                            
-                            if pd.isna(row['# of Order']) or row['# of Order'] <= 0:
-                                error_msg = f"Invalid Order Quantity for order {row['PO No.']}: {row['# of Order']}"
-                                errors.append(error_msg)
-                                continue
-                            
-                            total_units = row['# of Order'] * product['Units Per Order']
-                            # Calculate unit price - IMPROVED CALCULATION
-                            unit_price = row['Price'] / product['Units Per Order']
-                            
-                            # Calculate Total Price with validation
-                            try:
-                                total_price = total_units * unit_price
-                                if pd.isna(total_price) or pd.isinf(total_price):
-                                    error_msg = f"Invalid Total Price calculation for {internal_ref}: units={total_units}, unit_price={unit_price}, result={total_price}"
-                                    errors.append(error_msg)
-                                    continue
-                            except Exception as e:
-                                error_msg = f"Error calculating Total Price for {internal_ref}: {e}"
-                                errors.append(error_msg)
-                                continue
-                            
-                            expanded_orders.append({
-                                'Store ID': row['Store ID'],
-                                'Store Name': row['Store Name'],
-                                'Store Official Name': row['Store Official Name'],
-                                'PO No.': row['PO No.'],
-                                'Order Date': row['Order Date'],
-                                'Delivery Date': row['Delivery Date'],
-                                'Internal Reference': internal_ref,
-                                'Barcode': product['Barcode'],
-                                'Product Name': product['Name'],
-                                'Units Per Order': product['Units Per Order'],
-                                'Original Order Quantity': row['# of Order'],
-                                'Total Units': total_units,
-                                'Unit Price': unit_price,
-                                'Total Price': total_price,
-                                'Is Multi Product': False
-                            })
-                        except Exception as e:
-                            error_msg = f"Error processing single product reference {internal_ref}: {e}"
-                            errors.append(error_msg)
-                    else:
-                        error_msg = f"No product found for internal reference: {internal_ref}"
-                        errors.append(error_msg)
-            except Exception as e:
-                error_msg = f"Unexpected error processing row {row.get('PO No.', 'Unknown')}: {e}"
-                errors.append(error_msg)
-                st.error(f"❌ {error_msg}")
-                st.write(f"Error details: {str(e)}")
-                import traceback
-                st.write(f"Traceback: {traceback.format_exc()}")
-        
-        if not expanded_orders:
-            error_msg = "No expanded orders were created - check product variants matching"
-            errors.append(error_msg)
-            st.error(f"❌ {error_msg}")
-            self.expanded_orders = pd.DataFrame()
-        else:
-            self.expanded_orders = pd.DataFrame(expanded_orders)
-            st.success(f"✅ Expanded to {len(self.expanded_orders)} order lines")
-            
-        return errors
-    
-    def create_order_line_details(self):
-        """Create detailed order line items for Odoo import with store-level aggregation"""
-        if self.expanded_orders is None or self.expanded_orders.empty:
-            st.error("❌ No expanded orders available for creating order line details")
-            self.order_line_details = pd.DataFrame()
-            return
-        
-        if self.order_summaries is None or self.order_summaries.empty:
-            st.error("❌ No order summaries available for creating order line details")
-            self.order_line_details = pd.DataFrame()
-            return
-        
-        # Create order reference mapping
-        order_ref_mapping = {}
-        for _, summary in self.order_summaries.iterrows():
-            store_id = summary['Store ID']
-            order_ref_mapping[store_id] = summary['Order Reference']
-        
-        # Aggregate products by store and product
-        st.info("🔄 Aggregating products by store and product...")
-        
-        # Validate required columns exist
-        required_columns = ['Total Price', 'Total Units', 'Original Order Quantity']
-        missing_columns = [col for col in required_columns if col not in self.expanded_orders.columns]
-        if missing_columns:
-            st.error(f"❌ Missing required columns for aggregation: {missing_columns}")
-            st.write("Available columns:", list(self.expanded_orders.columns))
-            self.order_line_details = pd.DataFrame()
-            return
-        
-        # Group by store and product to aggregate quantities and prices
-        aggregation_groups = self.expanded_orders.groupby([
-            'Store ID', 'Store Name', 'Store Official Name', 
-            'Internal Reference', 'Barcode', 'Product Name', 'Units Per Order'
-        ]).agg({
-            'Original Order Quantity': 'sum',
-            'Total Units': 'sum',
-            'Total Price': 'sum',
-            'PO No.': lambda x: ', '.join(map(str, sorted(set(x)))),
-            'Order Date': 'min',  # Earliest order date
-            'Delivery Date': 'min',  # Earliest delivery date
-            'Is Multi Product': 'first'  # Keep the multi-product flag
-        }).reset_index()
-        
-        # Calculate aggregated unit price with validation
-        try:
-            aggregation_groups['Unit Price'] = aggregation_groups['Total Price'] / aggregation_groups['Total Units']
-            
-            # Check for any invalid unit prices
-            invalid_prices = aggregation_groups[aggregation_groups['Unit Price'].isna() | aggregation_groups['Unit Price'].isinf()]
-            if not invalid_prices.empty:
-                st.warning(f"⚠️ Found {len(invalid_prices)} rows with invalid unit prices")
-                st.write("Invalid price rows:", invalid_prices[['Store ID', 'Internal Reference', 'Total Price', 'Total Units']].head())
+                if len(products) == 0:
+                    error_msg = f"No products found for multi-product reference: {internal_ref}"
+                    errors.append(error_msg)
+                    continue
                 
-        except Exception as e:
-            st.error(f"❌ Error calculating aggregated unit prices: {e}")
-            st.write("Data types in aggregation_groups:")
-            st.write(aggregation_groups.dtypes)
-            self.order_line_details = pd.DataFrame()
-            return
-        
-        # Create aggregated order line details
-        line_details = []
-        
-        for _, row in aggregation_groups.iterrows():
-            store_id = row['Store ID']
-            order_ref = order_ref_mapping.get(store_id, f"OATS{store_id:06d}")
-            
-            # Determine product identifier
-            if row['Is Multi Product']:
-                # For multi-product references, use barcode
-                product_identifier = row['Barcode']
-            else:
-                # For single product references, use internal reference
-                product_identifier = row['Internal Reference']
-            
-            line_details.append({
-                'Order Reference': order_ref,
-                'Store ID': store_id,
-                'Store Name': row['Store Name'],
-                'Store Official Name': row['Store Official Name'],
-                'Internal Reference': row['Internal Reference'],
-                'Barcode': row['Barcode'],
-                'Product Identifier': product_identifier,
-                'Product Name': row['Product Name'],
-                'Aggregated Order Quantity': row['Original Order Quantity'],
-                'Units Per Order': row['Units Per Order'],
-                'Total Aggregated Units': row['Total Units'],
-                'Aggregated Unit Price': row['Unit Price'],
-                'Total Aggregated Price': row['Total Price'],
-                'PO Numbers': row['PO No.'],  # Combined PO numbers
-                'Earliest Order Date': row['Order Date'],
-                'Earliest Delivery Date': row['Delivery Date'],
-                'Is Multi Product': row['Is Multi Product']
+                # Calculate units per product (distribute equally)
+                try:
+                    total_units = row['# of Order'] * products.iloc[0]['Units Per Order']
+                    units_per_product = total_units / len(products)
+                    
+                    # Create a line for each product
+                    for i, (_, product) in enumerate(products.iterrows()):
+                        # Distribute units as evenly as possible
+                        if i == 0:
+                            # First product gets the remainder
+                            actual_units = int(units_per_product) + (total_units % len(products))
+                        else:
+                            actual_units = int(units_per_product)
+                        
+                        # Calculate unit price - IMPROVED CALCULATION
+                        unit_price = row['Price'] / product['Units Per Order']
+                        
+                        expanded_orders.append({
+                            'Store ID': row['Store ID'],
+                            'Store Name': row['Store Name'],
+                            'Store Official Name': row['Store Official Name'],
+                            'PO No.': row['PO No.'],
+                'Order Date': row['Order Date'],
+                'Delivery Date': row['Delivery Date']
             })
         
         if line_details:
             self.order_line_details = pd.DataFrame(line_details)
-            
-            # Show aggregation summary
-            original_count = len(self.expanded_orders)
-            aggregated_count = len(self.order_line_details)
-            reduction = original_count - aggregated_count
-            
-            st.success(f"✅ Created {len(self.order_line_details)} aggregated order line details")
-            st.info(f"📊 Aggregation reduced {original_count} individual lines to {aggregated_count} store-product lines (reduction: {reduction})")
-            
-            # Show sample of aggregated data
-            if aggregated_count > 0:
-                st.write("📋 Sample of aggregated data:")
-                sample_data = self.order_line_details.head(5)[[
-                    'Store ID', 'Store Name', 'Internal Reference', 'Product Name', 
-                    'Total Aggregated Units', 'Total Aggregated Price', 'PO Numbers'
-                ]]
-                st.dataframe(sample_data, use_container_width=True)
+            st.success(f"✅ Created {len(self.order_line_details)} order line details")
         else:
             st.error("❌ No order line details were created")
             self.order_line_details = pd.DataFrame()
@@ -726,28 +468,14 @@ class OdooConverter:
         
         # Validate calculations
         if (self.order_line_details is not None and not self.order_line_details.empty and 
-            self.purchase_orders is not None):
+            self.purchase_orders is not None and 'Total Price' in self.order_line_details.columns):
             
-            # Check which price column is available
-            if 'Total Aggregated Price' in self.order_line_details.columns:
-                price_column = 'Total Aggregated Price'
-                st.info("✅ Using aggregated price data for validation")
-            elif 'Total Price' in self.order_line_details.columns:
-                price_column = 'Total Price'
-                st.info("✅ Using original price data for validation")
-            else:
-                price_column = None
-                st.warning("⚠️ No price column found for validation")
-            
-            if price_column:
-                total_price_check = abs(self.order_line_details[price_column].sum() - 
-                                       self.purchase_orders['Price'].sum())
-                if total_price_check > 0.01:  # Allow small rounding differences
-                    error_msg = f"Price mismatch: ${total_price_check:.2f}"
-                    errors.append(error_msg)
-                    st.warning(f"⚠️ {error_msg}")
-                else:
-                    st.success("✅ Price validation passed - aggregated totals match original totals")
+            total_price_check = abs(self.order_line_details['Total Price'].sum() - 
+                                   self.purchase_orders['Price'].sum())
+            if total_price_check > 0.01:  # Allow small rounding differences
+                error_msg = f"Price mismatch: ${total_price_check:.2f}"
+                errors.append(error_msg)
+                st.warning(f"⚠️ {error_msg}")
         
         if not errors:
             st.success("✅ Data validation completed successfully")
@@ -760,25 +488,15 @@ class OdooConverter:
             st.error("❌ Cannot generate summary report - missing data")
             return
         
-        # Calculate aggregation metrics
-        original_lines = len(self.purchase_orders)
-        expanded_lines = len(self.expanded_orders) if self.expanded_orders is not None else 0
-        aggregated_lines = len(self.order_line_details)
-        aggregation_reduction = expanded_lines - aggregated_lines
-        
-        # Determine which price column to use based on available columns
-        price_column = 'Total Aggregated Price' if 'Total Aggregated Price' in self.order_line_details.columns else 'Total Price'
-        
         report = {
             'Total Stores': len(self.order_summaries),
             'Total PO Numbers': self.purchase_orders['PO No.'].nunique(),
-            'Total Order Lines (Original)': original_lines,
-            'Total Order Lines (Expanded)': expanded_lines,
-            'Total Order Lines (Aggregated)': aggregated_lines,
-            'Aggregation Reduction': aggregation_reduction,
+            'Total Order Lines (Original)': len(self.purchase_orders),
+            'Total Order Lines (Expanded)': len(self.order_line_details),
             'Multi-Product References': len(self.expanded_orders[self.expanded_orders['Is Multi Product'] == True]['Internal Reference'].unique()) if self.expanded_orders is not None else 0,
-            'Total Value': self.order_line_details[price_column].sum(),
-            'Average Order Value': self.order_line_details[price_column].mean()
+            'Total Value': self.order_line_details['Total Price'].sum(),
+            'Average Order Value': self.order_line_details['Total Price'].mean(),
+            'Embedded Stores Available': len(EMBEDDED_STORE_NAMES)
         }
         
         st.markdown("### 📊 Conversion Summary Report")
@@ -793,26 +511,18 @@ class OdooConverter:
             st.metric("Expanded Order Lines", report['Total Order Lines (Expanded)'])
         
         with col3:
-            st.metric("Aggregated Order Lines", report['Total Order Lines (Aggregated)'])
-            st.metric("Aggregation Reduction", f"-{report['Aggregation Reduction']} lines")
-        
-        with col4:
             st.metric("Multi-Product References", report['Multi-Product References'])
             st.metric("Total Value", f"${report['Total Value']:,.2f}")
         
-        # Show aggregation benefits
-        if aggregation_reduction > 0:
-            st.success(f"🎯 **Aggregation Benefits**: Reduced {aggregation_reduction} duplicate lines by consolidating multiple orders of the same product from the same store")
-            
-            # Calculate percentage reduction
-            reduction_percentage = (aggregation_reduction / expanded_lines) * 100 if expanded_lines > 0 else 0
-            st.info(f"📊 **Efficiency Gain**: {reduction_percentage:.1f}% reduction in order line complexity")
+        with col4:
+            st.metric("Average Order Value", f"${report['Average Order Value']:,.2f}")
+            st.metric("Embedded Stores", report['Embedded Stores Available'])
     
     def process_all(self) -> Tuple[pd.DataFrame, pd.DataFrame, List[str]]:
         """Run the complete conversion process"""
         errors = []
         
-        # Match store names
+        # Match store names (now using embedded data)
         store_errors = self.match_store_names()
         errors.extend(store_errors)
         
@@ -836,16 +546,22 @@ class OdooConverter:
         return self.order_summaries, self.order_line_details, errors
 
 def main():
-    """Main Streamlit application"""
+    """Main Streamlit application with embedded store names"""
     
     # Header
     st.markdown('<h1 class="main-header">🛒 T&T Purchase Order Processor</h1>', unsafe_allow_html=True)
     st.markdown("---")
     
-    st.info("📋 Upload your Product Variants and Purchase Orders files to convert to Odoo format (Store Names are automatically loaded)")
-    st.success("🔄 **New Feature**: Products are now aggregated by store - multiple orders of the same product from the same store are consolidated into single lines!")
+    # Information about embedded store names
+    st.markdown("""
+    <div class="embedded-info">
+        <h4>✨ Enhanced Version with Embedded Store Names</h4>
+        <p>🎉 <strong>No need to upload store names file anymore!</strong> All 37 T&T store names are now embedded in the application.</p>
+        <p>📋 Simply upload your <strong>Purchase Orders</strong> and <strong>Product Variants</strong> files to get started.</p>
+    </div>
+    """, unsafe_allow_html=True)
     
-    # File uploads in columns
+    # File uploads in columns (only 2 columns now since store names are embedded)
     col1, col2 = st.columns(2)
     
     with col1:
@@ -880,38 +596,12 @@ def main():
                     product_variants = read_csv_file(product_variants_file)
                 
                 if not product_variants.empty:
-                    # Clean column names
-                    product_variants.columns = product_variants.columns.str.strip()
-                    
-                    # Convert numeric columns
-                    if 'Units Per Order' in product_variants.columns:
-                        product_variants['Units Per Order'] = pd.to_numeric(product_variants['Units Per Order'], errors='coerce')
-                    
                     st.success(f"✅ Loaded {len(product_variants)} products")
                     st.dataframe(product_variants.head(3), use_container_width=True)
                 else:
                     st.error("❌ File is empty")
             except Exception as e:
                 st.error(f"❌ Error loading file: {e}")
-    
-    with col2:
-        st.markdown('<h3 class="section-header">🏪 Store Names (Embedded)</h3>', unsafe_allow_html=True)
-        
-        # Use embedded store names data
-        store_names = get_embedded_store_names()
-        
-        if not store_names.empty:
-            st.success(f"✅ Loaded {len(store_names)} stores (embedded data)")
-            st.dataframe(store_names.head(3), use_container_width=True)
-            
-            # Show store count info
-            st.info(f"📊 Total stores available: {len(store_names)}")
-            
-            # Optional: Show all stores in expandable section
-            with st.expander("📋 View All Stores", expanded=False):
-                st.dataframe(store_names, use_container_width=True)
-        else:
-            st.error("❌ Failed to load embedded store data")
     
     with col2:
         st.markdown('<h3 class="section-header">🛒 Purchase Orders</h3>', unsafe_allow_html=True)
@@ -950,11 +640,9 @@ def main():
                     if '# of Order ' in purchase_orders.columns:
                         purchase_orders = purchase_orders.rename(columns={'# of Order ': '# of Order'})
                     
-                    # Convert to numeric for proper sorting and calculations
+                    # Convert to numeric for proper sorting
                     purchase_orders['Store ID'] = pd.to_numeric(purchase_orders['Store ID'], errors='coerce')
                     purchase_orders['PO No.'] = pd.to_numeric(purchase_orders['PO No.'], errors='coerce')
-                    purchase_orders['# of Order'] = pd.to_numeric(purchase_orders['# of Order'], errors='coerce')
-                    purchase_orders['Price'] = pd.to_numeric(purchase_orders['Price'], errors='coerce')
                     
                     # Sort by Store ID and PO No.
                     purchase_orders = purchase_orders.sort_values(by=['Store ID', 'PO No.'], ascending=[True, True])
@@ -971,17 +659,24 @@ def main():
             except Exception as e:
                 st.error(f"❌ Error loading file: {e}")
     
+    # Show embedded store names information
+    st.markdown("---")
+    with st.expander("📋 View Embedded Store Names", expanded=False):
+        embedded_stores = get_embedded_store_names()
+        st.dataframe(embedded_stores, use_container_width=True)
+        st.info(f"📊 Total embedded stores: {len(embedded_stores)}")
+    
     # Processing section
     st.markdown("---")
     st.markdown('<h2 class="section-header">🔄 Process & Convert</h2>', unsafe_allow_html=True)
     
-    # Check if required files are uploaded (store names are now embedded)
+    # Check if required files are uploaded (only 2 files needed now)
     if product_variants is not None and purchase_orders is not None:
         if st.button("🚀 Convert to Odoo Format", type="primary", use_container_width=True):
-            with st.spinner("Converting to Odoo format..."):
+            with st.spinner("Converting to Odoo format using embedded store names..."):
                 try:
-                    # Initialize converter
-                    converter = OdooConverter(purchase_orders, product_variants, store_names)
+                    # Initialize converter (no need to pass store_names anymore)
+                    converter = OdooConverter(purchase_orders, product_variants)
                     
                     # Process conversion
                     order_summaries, order_line_details, errors = converter.process_all()
@@ -996,26 +691,10 @@ def main():
                     else:
                         st.error("❌ No order summaries were generated")
                     
-                            # Show order line details
+                    # Show order line details
                     if order_line_details is not None and not order_line_details.empty:
                         with st.expander("📊 Order Line Details (First 20 rows)", expanded=False):
                             st.dataframe(order_line_details.head(20), use_container_width=True)
-                            
-                            # Show aggregation statistics
-                            if 'Total Aggregated Units' in order_line_details.columns:
-                                st.info("📊 **Aggregation Statistics:**")
-                                col1, col2, col3 = st.columns(3)
-                                with col1:
-                                    st.metric("Total Products", order_line_details['Internal Reference'].nunique())
-                                    st.metric("Total Stores", order_line_details['Store ID'].nunique())
-                                with col2:
-                                    st.metric("Total Units", order_line_details['Total Aggregated Units'].sum())
-                                    st.metric("Total Value", f"${order_line_details['Total Aggregated Price'].sum():,.2f}")
-                                with col3:
-                                    avg_units = order_line_details['Total Aggregated Units'].mean()
-                                    avg_price = order_line_details['Total Aggregated Price'].mean()
-                                    st.metric("Avg Units/Line", f"{avg_units:.1f}")
-                                    st.metric("Avg Price/Line", f"${avg_price:.2f}")
                     else:
                         st.error("❌ No order line details were generated")
                     
@@ -1042,7 +721,9 @@ def main():
                                 # Save original data for reference
                                 purchase_orders.to_excel(writer, sheet_name='Original Purchase Orders', index=False)
                                 product_variants.to_excel(writer, sheet_name='Product Variants', index=False)
-                                store_names.to_excel(writer, sheet_name='Store Names', index=False)
+                                
+                                # Save embedded store names for reference
+                                get_embedded_store_names().to_excel(writer, sheet_name='Embedded Store Names', index=False)
                             
                             excel_buffer.seek(0)
                         
@@ -1066,7 +747,7 @@ def main():
                         - **Order Line Details**: Detailed product lines for Odoo import
                         - **Original Purchase Orders**: Raw extracted data
                         - **Product Variants**: Reference product data
-                        - **Store Names**: Reference store data
+                        - **Embedded Store Names**: Reference store data (embedded in app)
                         """)
                     else:
                         st.error("❌ Cannot generate download file - no valid data was created")
@@ -1079,38 +760,17 @@ def main():
                     st.write("📊 Debug Info:")
                     st.write(f"Purchase Orders shape: {purchase_orders.shape}")
                     st.write(f"Product Variants shape: {product_variants.shape}")
-                    st.write(f"Store Names shape: {store_names.shape}")
                     st.write(f"Purchase Orders columns: {list(purchase_orders.columns)}")
                     st.write(f"Product Variants columns: {list(product_variants.columns)}")
-                    st.write(f"Store Names columns: {list(store_names.columns)}")
-                    
-                    # Show data types and sample values
-                    st.write("📋 Purchase Orders data types:")
-                    st.write(purchase_orders.dtypes)
-                    st.write("📋 Product Variants data types:")
-                    st.write(product_variants.dtypes)
                     
                     # Show first few rows of each dataset
                     st.write("Purchase Orders sample:")
                     st.dataframe(purchase_orders.head(3))
                     st.write("Product Variants sample:")
                     st.dataframe(product_variants.head(3))
-                    st.write("Store Names sample:")
-                    st.dataframe(store_names.head(3))
-                    
-                    # Show any NaN or invalid values
-                    st.write("🔍 Checking for invalid data:")
-                    if 'Price' in purchase_orders.columns:
-                        st.write(f"Price column - NaN count: {purchase_orders['Price'].isna().sum()}")
-                        st.write(f"Price column - Zero/negative count: {(purchase_orders['Price'] <= 0).sum()}")
-                        st.write(f"Price column sample values: {purchase_orders['Price'].head(10).tolist()}")
-                    if 'Units Per Order' in product_variants.columns:
-                        st.write(f"Units Per Order - NaN count: {product_variants['Units Per Order'].isna().sum()}")
-                        st.write(f"Units Per Order - Zero/negative count: {(product_variants['Units Per Order'] <= 0).sum()}")
-                        st.write(f"Units Per Order sample values: {product_variants['Units Per Order'].head(10).tolist()}")
     
     else:
-        st.info("📋 Please upload the required files to proceed with conversion")
+        st.info("📋 Please upload both required files to proceed with conversion")
         
         missing_files = []
         if product_variants is None:
@@ -1121,18 +781,22 @@ def main():
         if missing_files:
             st.warning(f"⚠️ Missing files: {', '.join(missing_files)}")
         
-        st.success("✅ Store Names are automatically loaded (embedded data)")
+        st.success("✅ Store Names: Using embedded data (no upload required)")
     
     # Help section
     with st.sidebar:
         st.markdown("## ℹ️ Help & Instructions")
         st.markdown("""
+        **✨ Enhanced Version Features:**
+        - 🎉 **No Store Names Upload Required!** All 37 T&T store names are embedded
+        - 🚀 Faster processing with only 2 file uploads needed
+        - 📊 Enhanced validation and error reporting
+        
         **How to use this tool:**
         
-        1. **Upload Files**: Upload the required files
+        1. **Upload Files**: Upload only 2 files now:
            - Product Variants (Excel/CSV)
            - Purchase Orders (Excel/CSV)
-           - Store Names are automatically loaded (embedded data)
         
         2. **Convert**: Click "Convert to Odoo Format" button
         
@@ -1140,22 +804,140 @@ def main():
         
         **Required File Formats:**
         - **Product Variants**: Must contain columns like 'Internal Reference', 'Barcode', 'Name', 'Units Per Order'
-        - **Store Names**: Automatically loaded (37 stores embedded - all T&T locations)
         - **Purchase Orders**: Must contain 'Store ID', 'Store Name', 'PO No.', 'Order Date', 'Delivery Date', 'Internal Reference', '# of Order', 'Price'
+        
+        **Embedded Store Names:**
+        - ✅ All 37 T&T store locations included
+        - 🔄 Automatic matching by Store ID
+        - 📋 View complete list in the expandable section above
         
         **Features:**
         - Automatic product mapping
         - Multi-product reference handling
-        - **Store-level product aggregation** (consolidates multiple orders of same product from same store)
         - Comprehensive error reporting
         - Odoo-compatible output format
-        
-        **Aggregation Benefits:**
-        - Reduces duplicate product lines when same store orders same product multiple times
-        - Combines quantities and prices for cleaner Odoo import
-        - Maintains all PO numbers for reference
-        - Shows efficiency gains in the summary report
         """)
+        
+        # Show quick stats about embedded stores
+        st.markdown("### 📊 Embedded Store Stats")
+        embedded_stores = get_embedded_store_names()
+        st.metric("Total Stores", len(embedded_stores))
+        st.metric("Store ID Range", f"{embedded_stores['Store ID'].min()}-{embedded_stores['Store ID'].max()}")
+        
+        # Show some example store names
+        st.markdown("**Example Stores:**")
+        sample_stores = embedded_stores.sample(min(3, len(embedded_stores)))
+        for _, store in sample_stores.iterrows():
+            st.write(f"• Store {store['Store ID']}: {store['Store Official Name'].split(' - ')[0].split(', ')[-1]}")
 
 if __name__ == "__main__":
-    main() 
+    main()PO No.'],
+                            'Order Date': row['Order Date'],
+                            'Delivery Date': row['Delivery Date'],
+                            'Internal Reference': internal_ref,
+                            'Barcode': product['Barcode'],
+                            'Product Name': product['Name'],
+                            'Units Per Order': product['Units Per Order'],
+                            'Original Order Quantity': row['# of Order'],
+                            'Total Units': actual_units,
+                            'Unit Price': unit_price,
+                            'Total Price': actual_units * unit_price,
+                            'Is Multi Product': True
+                        })
+                
+                except Exception as e:
+                    error_msg = f"Error processing multi-product reference {internal_ref}: {e}"
+                    errors.append(error_msg)
+                    
+            else:
+                # Single product reference - keep as is
+                product = self.product_variants[self.product_variants['Internal Reference'] == internal_ref]
+                if len(product) > 0:
+                    product = product.iloc[0]
+                    try:
+                        total_units = row['# of Order'] * product['Units Per Order']
+                        # Calculate unit price - IMPROVED CALCULATION
+                        unit_price = row['Price'] / product['Units Per Order']
+                        
+                        expanded_orders.append({
+                            'Store ID': row['Store ID'],
+                            'Store Name': row['Store Name'],
+                            'Store Official Name': row['Store Official Name'],
+                            'PO No.': row['PO No.'],
+                            'Order Date': row['Order Date'],
+                            'Delivery Date': row['Delivery Date'],
+                            'Internal Reference': internal_ref,
+                            'Barcode': product['Barcode'],
+                            'Product Name': product['Name'],
+                            'Units Per Order': product['Units Per Order'],
+                            'Original Order Quantity': row['# of Order'],
+                            'Total Units': total_units,
+                            'Unit Price': unit_price,
+                            'Total Price': total_units * unit_price,
+                            'Is Multi Product': False
+                        })
+                    except Exception as e:
+                        error_msg = f"Error processing single product reference {internal_ref}: {e}"
+                        errors.append(error_msg)
+                else:
+                    error_msg = f"No product found for internal reference: {internal_ref}"
+                    errors.append(error_msg)
+        
+        if not expanded_orders:
+            error_msg = "No expanded orders were created - check product variants matching"
+            errors.append(error_msg)
+            st.error(f"❌ {error_msg}")
+            self.expanded_orders = pd.DataFrame()
+        else:
+            self.expanded_orders = pd.DataFrame(expanded_orders)
+            st.success(f"✅ Expanded to {len(self.expanded_orders)} order lines")
+            
+        return errors
+    
+    def create_order_line_details(self):
+        """Create detailed order line items for Odoo import"""
+        if self.expanded_orders is None or self.expanded_orders.empty:
+            st.error("❌ No expanded orders available for creating order line details")
+            self.order_line_details = pd.DataFrame()
+            return
+        
+        if self.order_summaries is None or self.order_summaries.empty:
+            st.error("❌ No order summaries available for creating order line details")
+            self.order_line_details = pd.DataFrame()
+            return
+        
+        # Create order reference mapping
+        order_ref_mapping = {}
+        for _, summary in self.order_summaries.iterrows():
+            store_id = summary['Store ID']
+            order_ref_mapping[store_id] = summary['Order Reference']
+        
+        # Create order line details
+        line_details = []
+        
+        for _, row in self.expanded_orders.iterrows():
+            store_id = row['Store ID']
+            order_ref = order_ref_mapping.get(store_id, f"OATS{store_id:06d}")
+            
+            # Determine product identifier
+            if row['Is Multi Product']:
+                # For multi-product references, use barcode
+                product_identifier = row['Barcode']
+            else:
+                # For single product references, use internal reference
+                product_identifier = row['Internal Reference']
+            
+            line_details.append({
+                'Order Reference': order_ref,
+                'Store ID': store_id,
+                'Store Name': row['Store Name'],
+                'Internal Reference': row['Internal Reference'],
+                'Barcode': row['Barcode'],
+                'Product Identifier': product_identifier,
+                'Product Name': row['Product Name'],
+                'Original Order Quantity': row['Original Order Quantity'],
+                'Units Per Order': row['Units Per Order'],
+                'Total Units': row['Total Units'],
+                'Unit Price': row['Unit Price'],
+                'Total Price': row['Total Price'],
+                'PO No.': row['
