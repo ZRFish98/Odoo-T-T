@@ -477,7 +477,7 @@ class OdooConverter:
         return errors
     
     def create_order_line_details(self):
-        """Create detailed order line items for Odoo import"""
+        """Create detailed order line items for Odoo import with store-level aggregation"""
         if self.expanded_orders is None or self.expanded_orders.empty:
             st.error("❌ No expanded orders available for creating order line details")
             self.order_line_details = pd.DataFrame()
@@ -494,10 +494,30 @@ class OdooConverter:
             store_id = summary['Store ID']
             order_ref_mapping[store_id] = summary['Order Reference']
         
-        # Create order line details
+        # Aggregate products by store and product
+        st.info("🔄 Aggregating products by store and product...")
+        
+        # Group by store and product to aggregate quantities and prices
+        aggregation_groups = self.expanded_orders.groupby([
+            'Store ID', 'Store Name', 'Store Official Name', 
+            'Internal Reference', 'Barcode', 'Product Name', 'Units Per Order'
+        ]).agg({
+            'Original Order Quantity': 'sum',
+            'Total Units': 'sum',
+            'Total Price': 'sum',
+            'PO No.': lambda x: ', '.join(map(str, sorted(set(x)))),
+            'Order Date': 'min',  # Earliest order date
+            'Delivery Date': 'min',  # Earliest delivery date
+            'Is Multi Product': 'first'  # Keep the multi-product flag
+        }).reset_index()
+        
+        # Calculate aggregated unit price
+        aggregation_groups['Unit Price'] = aggregation_groups['Total Price'] / aggregation_groups['Total Units']
+        
+        # Create aggregated order line details
         line_details = []
         
-        for _, row in self.expanded_orders.iterrows():
+        for _, row in aggregation_groups.iterrows():
             store_id = row['Store ID']
             order_ref = order_ref_mapping.get(store_id, f"OATS{store_id:06d}")
             
@@ -513,23 +533,41 @@ class OdooConverter:
                 'Order Reference': order_ref,
                 'Store ID': store_id,
                 'Store Name': row['Store Name'],
+                'Store Official Name': row['Store Official Name'],
                 'Internal Reference': row['Internal Reference'],
                 'Barcode': row['Barcode'],
                 'Product Identifier': product_identifier,
                 'Product Name': row['Product Name'],
-                'Original Order Quantity': row['Original Order Quantity'],
+                'Aggregated Order Quantity': row['Original Order Quantity'],
                 'Units Per Order': row['Units Per Order'],
-                'Total Units': row['Total Units'],
-                'Unit Price': row['Unit Price'],
-                'Total Price': row['Total Price'],
-                'PO No.': row['PO No.'],
-                'Order Date': row['Order Date'],
-                'Delivery Date': row['Delivery Date']
+                'Total Aggregated Units': row['Total Units'],
+                'Aggregated Unit Price': row['Unit Price'],
+                'Total Aggregated Price': row['Total Price'],
+                'PO Numbers': row['PO No.'],  # Combined PO numbers
+                'Earliest Order Date': row['Order Date'],
+                'Earliest Delivery Date': row['Delivery Date'],
+                'Is Multi Product': row['Is Multi Product']
             })
         
         if line_details:
             self.order_line_details = pd.DataFrame(line_details)
-            st.success(f"✅ Created {len(self.order_line_details)} order line details")
+            
+            # Show aggregation summary
+            original_count = len(self.expanded_orders)
+            aggregated_count = len(self.order_line_details)
+            reduction = original_count - aggregated_count
+            
+            st.success(f"✅ Created {len(self.order_line_details)} aggregated order line details")
+            st.info(f"📊 Aggregation reduced {original_count} individual lines to {aggregated_count} store-product lines (reduction: {reduction})")
+            
+            # Show sample of aggregated data
+            if aggregated_count > 0:
+                st.write("📋 Sample of aggregated data:")
+                sample_data = self.order_line_details.head(5)[[
+                    'Store ID', 'Store Name', 'Internal Reference', 'Product Name', 
+                    'Total Aggregated Units', 'Total Aggregated Price', 'PO Numbers'
+                ]]
+                st.dataframe(sample_data, use_container_width=True)
         else:
             st.error("❌ No order line details were created")
             self.order_line_details = pd.DataFrame()
@@ -558,14 +596,28 @@ class OdooConverter:
         
         # Validate calculations
         if (self.order_line_details is not None and not self.order_line_details.empty and 
-            self.purchase_orders is not None and 'Total Price' in self.order_line_details.columns):
+            self.purchase_orders is not None):
             
-            total_price_check = abs(self.order_line_details['Total Price'].sum() - 
-                                   self.purchase_orders['Price'].sum())
-            if total_price_check > 0.01:  # Allow small rounding differences
-                error_msg = f"Price mismatch: ${total_price_check:.2f}"
-                errors.append(error_msg)
-                st.warning(f"⚠️ {error_msg}")
+            # Check which price column is available
+            if 'Total Aggregated Price' in self.order_line_details.columns:
+                price_column = 'Total Aggregated Price'
+                st.info("✅ Using aggregated price data for validation")
+            elif 'Total Price' in self.order_line_details.columns:
+                price_column = 'Total Price'
+                st.info("✅ Using original price data for validation")
+            else:
+                price_column = None
+                st.warning("⚠️ No price column found for validation")
+            
+            if price_column:
+                total_price_check = abs(self.order_line_details[price_column].sum() - 
+                                       self.purchase_orders['Price'].sum())
+                if total_price_check > 0.01:  # Allow small rounding differences
+                    error_msg = f"Price mismatch: ${total_price_check:.2f}"
+                    errors.append(error_msg)
+                    st.warning(f"⚠️ {error_msg}")
+                else:
+                    st.success("✅ Price validation passed - aggregated totals match original totals")
         
         if not errors:
             st.success("✅ Data validation completed successfully")
@@ -578,14 +630,25 @@ class OdooConverter:
             st.error("❌ Cannot generate summary report - missing data")
             return
         
+        # Calculate aggregation metrics
+        original_lines = len(self.purchase_orders)
+        expanded_lines = len(self.expanded_orders) if self.expanded_orders is not None else 0
+        aggregated_lines = len(self.order_line_details)
+        aggregation_reduction = expanded_lines - aggregated_lines
+        
+        # Determine which price column to use based on available columns
+        price_column = 'Total Aggregated Price' if 'Total Aggregated Price' in self.order_line_details.columns else 'Total Price'
+        
         report = {
             'Total Stores': len(self.order_summaries),
             'Total PO Numbers': self.purchase_orders['PO No.'].nunique(),
-            'Total Order Lines (Original)': len(self.purchase_orders),
-            'Total Order Lines (Expanded)': len(self.order_line_details),
+            'Total Order Lines (Original)': original_lines,
+            'Total Order Lines (Expanded)': expanded_lines,
+            'Total Order Lines (Aggregated)': aggregated_lines,
+            'Aggregation Reduction': aggregation_reduction,
             'Multi-Product References': len(self.expanded_orders[self.expanded_orders['Is Multi Product'] == True]['Internal Reference'].unique()) if self.expanded_orders is not None else 0,
-            'Total Value': self.order_line_details['Total Price'].sum(),
-            'Average Order Value': self.order_line_details['Total Price'].mean()
+            'Total Value': self.order_line_details[price_column].sum(),
+            'Average Order Value': self.order_line_details[price_column].mean()
         }
         
         st.markdown("### 📊 Conversion Summary Report")
@@ -600,11 +663,20 @@ class OdooConverter:
             st.metric("Expanded Order Lines", report['Total Order Lines (Expanded)'])
         
         with col3:
+            st.metric("Aggregated Order Lines", report['Total Order Lines (Aggregated)'])
+            st.metric("Aggregation Reduction", f"-{report['Aggregation Reduction']} lines")
+        
+        with col4:
             st.metric("Multi-Product References", report['Multi-Product References'])
             st.metric("Total Value", f"${report['Total Value']:,.2f}")
         
-        with col4:
-            st.metric("Average Order Value", f"${report['Average Order Value']:,.2f}")
+        # Show aggregation benefits
+        if aggregation_reduction > 0:
+            st.success(f"🎯 **Aggregation Benefits**: Reduced {aggregation_reduction} duplicate lines by consolidating multiple orders of the same product from the same store")
+            
+            # Calculate percentage reduction
+            reduction_percentage = (aggregation_reduction / expanded_lines) * 100 if expanded_lines > 0 else 0
+            st.info(f"📊 **Efficiency Gain**: {reduction_percentage:.1f}% reduction in order line complexity")
     
     def process_all(self) -> Tuple[pd.DataFrame, pd.DataFrame, List[str]]:
         """Run the complete conversion process"""
@@ -641,6 +713,7 @@ def main():
     st.markdown("---")
     
     st.info("📋 Upload your Product Variants and Purchase Orders files to convert to Odoo format (Store Names are automatically loaded)")
+    st.success("🔄 **New Feature**: Products are now aggregated by store - multiple orders of the same product from the same store are consolidated into single lines!")
     
     # File uploads in columns
     col1, col2 = st.columns(2)
@@ -784,10 +857,26 @@ def main():
                     else:
                         st.error("❌ No order summaries were generated")
                     
-                    # Show order line details
+                            # Show order line details
                     if order_line_details is not None and not order_line_details.empty:
                         with st.expander("📊 Order Line Details (First 20 rows)", expanded=False):
                             st.dataframe(order_line_details.head(20), use_container_width=True)
+                            
+                            # Show aggregation statistics
+                            if 'Total Aggregated Units' in order_line_details.columns:
+                                st.info("📊 **Aggregation Statistics:**")
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    st.metric("Total Products", order_line_details['Internal Reference'].nunique())
+                                    st.metric("Total Stores", order_line_details['Store ID'].nunique())
+                                with col2:
+                                    st.metric("Total Units", order_line_details['Total Aggregated Units'].sum())
+                                    st.metric("Total Value", f"${order_line_details['Total Aggregated Price'].sum():,.2f}")
+                                with col3:
+                                    avg_units = order_line_details['Total Aggregated Units'].mean()
+                                    avg_price = order_line_details['Total Aggregated Price'].mean()
+                                    st.metric("Avg Units/Line", f"{avg_units:.1f}")
+                                    st.metric("Avg Price/Line", f"${avg_price:.2f}")
                     else:
                         st.error("❌ No order line details were generated")
                     
@@ -901,8 +990,15 @@ def main():
         **Features:**
         - Automatic product mapping
         - Multi-product reference handling
+        - **Store-level product aggregation** (consolidates multiple orders of same product from same store)
         - Comprehensive error reporting
         - Odoo-compatible output format
+        
+        **Aggregation Benefits:**
+        - Reduces duplicate product lines when same store orders same product multiple times
+        - Combines quantities and prices for cleaner Odoo import
+        - Maintains all PO numbers for reference
+        - Shows efficiency gains in the summary report
         """)
 
 if __name__ == "__main__":
